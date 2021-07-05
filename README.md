@@ -1,6 +1,8 @@
 
 # libschema - schema migration for libraries
 
+[![GoDoc](https://godoc.org/github.com/muir/libschema?status.png)](https://pkg.go.dev/github.com/muir/libschema)
+
 Install:
 
 	go get github.com/muir/libschema
