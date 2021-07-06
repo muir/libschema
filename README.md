@@ -40,7 +40,6 @@ database.Migrations("MyLibrary",
 			)`
 	}),
 	lspostgres.Simple("addLastLogin", `
-		return `
 			ALTER TABLE users
 				ADD COLUMN last_login timestamp
 		`
