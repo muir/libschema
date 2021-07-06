@@ -26,7 +26,7 @@ func TestPostgresMigrations(t *testing.T) {
 	options, cleanup := lstesting.FakeSchema(t)
 
 	options.ErrorOnUnknownMigrations = true
-	options.OnAsyncMigrationFailure = func(name libschema.MigrationName, err error) {
+	options.OnMigrationFailure = func(name libschema.MigrationName, err error) {
 		actions = append(actions, fmt.Sprintf("FAIL %s: %s", name, err))
 	}
 	options.OnMigrationsStarted = func() {
@@ -39,6 +39,7 @@ func TestPostgresMigrations(t *testing.T) {
 			actions = append(actions, "COMPLETE")
 		}
 	}
+	options.DebugLogging = true
 	s := libschema.New(context.Background(), options)
 
 	db, err := sql.Open("postgres", dsn)

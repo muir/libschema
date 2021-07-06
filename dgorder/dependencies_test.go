@@ -1,4 +1,4 @@
-package libschema
+package dgorder
 
 import (
 	"fmt"
@@ -35,7 +35,7 @@ func TestDependenciesOkay(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		got, err := DependencyOrder(tc.nodes, strconv.Itoa)
+		got, err := Order(tc.nodes, strconv.Itoa)
 		if tc.err != "" {
 			assert.Equal(t, fmt.Errorf(tc.err), err)
 		} else {

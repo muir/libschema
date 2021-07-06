@@ -1,8 +1,7 @@
-package libschema
+package dgorder
 
 import (
 	"container/heap"
-	"fmt" // XXX
 
 	"github.com/pkg/errors"
 )
@@ -12,23 +11,22 @@ type Node struct {
 	isBlockedBy map[int]struct{}
 }
 
-// DependencyOrder returns a list of the indexes of the nodes
+// Order returns a list of the indexes of the nodes
 // in the order in which they can be acted upon so that no blocked
 // node comes before a node that blocks it.  Additionally, to
 // the extent possible nodes will be returned in-order.
 // If this is not possible, an error will be returned and the
-// describe function will be used to help generate the error.
-func DependencyOrder(nodes []Node, describe func(int) string) ([]int, error) {
+// describe function will be used to help generate the error so that
+// it is human-readable.
+func Order(nodes []Node, describe func(int) string) ([]int, error) {
 	for j := range nodes {
 		nodes[j].isBlockedBy = nil
 	}
 	for j, node := range nodes {
-		fmt.Println("XXX node", describe(j))
 		for _, i := range node.Blocking {
 			if i < 0 || i > len(nodes) {
 				return nil, errors.Errorf("Invalid dependency from %d to %d", j, i)
 			}
-			fmt.Println("  XXX blocking", describe(i))
 			if nodes[i].isBlockedBy == nil {
 				nodes[i].isBlockedBy = make(map[int]struct{})
 			}
