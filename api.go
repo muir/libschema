@@ -91,7 +91,8 @@ type Database struct {
 	unknownMigrations []MigrationName
 }
 
-// Options
+// Options operate at the Database level but are specified at the Schema level
+// at least initially.
 type Options struct {
 	// TrackingTable is the name of the table used to track which migrations
 	// have been applied
@@ -179,7 +180,7 @@ func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Drive
 // Asyncrhronous marks a migration is okay to run asynchronously.  If all of the
 // remaining migrations can be asynchronous, then schema.Migrate() will return
 // while the remaining migrations run.
-func Asyncrhronous() func(Migration) {
+func Asyncrhronous() MigrationOption {
 	return func(m Migration) {
 		m.Base().async = true
 	}
@@ -189,7 +190,7 @@ func Asyncrhronous() func(Migration) {
 // across library boundaries.  By default, migrations are dependent on the
 // prior migration defined.  After specifies that the current migration must
 // run after the named migration.
-func After(lib, migration string) func(Migration) {
+func After(lib, migration string) MigrationOption {
 	return func(m Migration) {
 		base := m.Base()
 		rawAfter := make([]MigrationName, len(base.rawAfter)+1)
