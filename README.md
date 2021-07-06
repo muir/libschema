@@ -33,13 +33,13 @@ sqlDB, err := sql.Open("postgres", "....")
 database, err := lspostgres.New(logger, "main-db", schema, sqlDB)
 
 database.Migrations("MyLibrary",
-	lspostgres.Simple("createUserTable", `
+	lspostgres.Script("createUserTable", `
 			CREATE TAGLE users (
 				name	text,
 				id	bigint
 			)`
 	}),
-	lspostgres.Simple("addLastLogin", `
+	lspostgres.Script("addLastLogin", `
 			ALTER TABLE users
 				ADD COLUMN last_login timestamp
 		`
@@ -82,13 +82,13 @@ data.
 ```go
 database.Migrations("MyLibrary",
 	...
-	lspostgres.Simple("addColumn", `
+	lspostgres.Script("addColumn", `
 			ALTER TABLE users
 				ADD COLUMN rating`,
 	libschema.SkipThisAndFollowingIf(func() bool {
 		return semver.Compare(version(), "3.11.3") < 1
 	})),
-	lspostgres.Simple("fillInRatings", `
+	lspostgres.Script("fillInRatings", `
 			UPDATE	users
 			SET	rating = ...
 			WHERE	rating IS NULL;
@@ -110,7 +110,7 @@ Use `After()` to specify a cross-library dependency.
 ```go
 database.Migrations("users",
 	...
-	lspostgres.Simple("addOrg", `
+	lspostgres.Script("addOrg", `
 			ALTER TABLE users
 				ADD COLUMN org TEXT,
 				ADD ADD CONSTRAINT orgfk FOREIGN KEY (org)
@@ -120,7 +120,7 @@ database.Migrations("users",
 
 database.Migrations("orgs",
 	...
-	lspostgres.Simple("createOrgTable", `
+	lspostgres.Script("createOrgTable", `
 		...
 	`),
 )
