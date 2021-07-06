@@ -21,26 +21,26 @@ While this API is never going to match the caller's data structures, it should
 be easy to transform data to this format.
 
 ```go
-	import "github.com/muir/libschema/dgorder"
+import "github.com/muir/libschema/dgorder"
 
-	nodes := make([]dgorder.Node, len(myThings))
-	for i, thing := range myThings {
-		for _, blockedThing := range myThings.BlockedByMything {
-			nodes[i].Blocking = append(nodes[i].Blocking, getIndex(blockedThing))
-		}
-		for _, blockingThing := range myThings.ThingsBlockingMyThing {
-			j := getIndex(blockingThing)
-			nodes[j].Blocking = append(nodes[j].Blocking, i)
-		}
+nodes := make([]dgorder.Node, len(myThings))
+for i, thing := range myThings {
+	for _, blockedThing := range myThings.BlockedByMything {
+		nodes[i].Blocking = append(nodes[i].Blocking, getIndex(blockedThing))
 	}
-	ordering, err := dgorder.Order(nodes, func(i int) string {
-		return descriptionOfMyThingByIndex(i)
-	})
-	if err != nil {
-		panic("Dependency cycle! " + err.Error())
+	for _, blockingThing := range myThings.ThingsBlockingMyThing {
+		j := getIndex(blockingThing)
+		nodes[j].Blocking = append(nodes[j].Blocking, i)
 	}
-	myThingsInOrder := make([]MyThingType, len(myThings))
-	for i, e := range ordering {
-		myThingsInOrder[i] = myThings[e]
-	}
+}
+ordering, err := dgorder.Order(nodes, func(i int) string {
+	return descriptionOfMyThingByIndex(i)
+})
+if err != nil {
+	panic("Dependency cycle! " + err.Error())
+}
+myThingsInOrder := make([]MyThingType, len(myThings))
+for i, e := range ordering {
+	myThingsInOrder[i] = myThings[e]
+}
 ```

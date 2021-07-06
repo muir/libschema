@@ -25,41 +25,46 @@ specify and maintain a database schema.  Libschema hopes to start solving this p
 
 Migrations are registered:
 
-	schema := libschema.NewSchema(ctx, libschema.Options{})
+```go
+schema := libschema.NewSchema(ctx, libschema.Options{})
 
+sqlDB, err := sql.Open("postgres", "....")
 
-	sqlDB, err := sql.Open("postgres", "....")
+database, err := lspostgres.New(logger, "main-db", schema, sqlDB)
 
-	database, err := lspostgres.New(logger, "main-db", schema, sqlDB)
-
-	database.Migrations("MyLibrary",
-		lspostgres.Simple("createUserTable", `
-				CREATE TAGLE users (
-					name	text,
-					id	bigint
-				)`
-		}),
-		lspostgres.Simple("addLastLogin", `
-			return `
-				ALTER TABLE users
-					ADD COLUMN last_login timestamp
-			`
-		}),
-	)
+database.Migrations("MyLibrary",
+	lspostgres.Simple("createUserTable", `
+			CREATE TAGLE users (
+				name	text,
+				id	bigint
+			)`
+	}),
+	lspostgres.Simple("addLastLogin", `
+		return `
+			ALTER TABLE users
+				ADD COLUMN last_login timestamp
+		`
+	}),
+)
+```
 
 Migrations are then run run later in the order that they were registered.
 
-	err := schema.Migrate(context)
+```go
+err := schema.Migrate(context)
+```
 
 ## Computed Migrations
 
 Migrations may be SQL strings or migrations can be done in Go:
 
-	database.Migrations("MyLibrary", 
-		lspostgres.Computed("importUsers", func(_ context.Context, _ MyLogger, tx *sql.Tx) error {
-			// code to import users here
-		}),
-	)
+```go
+database.Migrations("MyLibrary", 
+	lspostgres.Computed("importUsers", func(_ context.Context, _ MyLogger, tx *sql.Tx) error {
+		// code to import users here
+	}),
+)
+```
 
 ## Asynchronous migrations 
 
@@ -75,23 +80,25 @@ Migrations can be tied to specific code versions so that they are not run until
 conditions are met.  This is done with `SkipRemainingIf`.  This be used to backfill
 data.
 
-	database.Migrations("MyLibrary",
-		...
-		lspostgres.Simple("addColumn", `
-				ALTER TABLE users
-					ADD COLUMN rating`,
-		libschema.SkipThisAndFollowingIf(func() bool {
-			return semver.Compare(version(), "3.11.3") < 1
-		})),
-		lspostgres.Simple("fillInRatings", `
-				UPDATE	users
-				SET	rating = ...
-				WHERE	rating IS NULL;
+```go
+database.Migrations("MyLibrary",
+	...
+	lspostgres.Simple("addColumn", `
+			ALTER TABLE users
+				ADD COLUMN rating`,
+	libschema.SkipThisAndFollowingIf(func() bool {
+		return semver.Compare(version(), "3.11.3") < 1
+	})),
+	lspostgres.Simple("fillInRatings", `
+			UPDATE	users
+			SET	rating = ...
+			WHERE	rating IS NULL;
 
-				ALTER TABLE users
-					MODIFY COLUMN rating SET NOT NULL;`,
-		libschema.Asychronous),
-	)
+			ALTER TABLE users
+				MODIFY COLUMN rating SET NOT NULL;`,
+	libschema.Asychronous),
+)
+```
 
 ## Cross-library dependencies
 
@@ -101,22 +108,24 @@ constraints.
 
 Use `After()` to specify a cross-library dependency.
 
-	database.Migrations("users",
-		...
-		lspostgres.Simple("addOrg", `
-				ALTER TABLE users
-					ADD COLUMN org TEXT,
-					ADD ADD CONSTRAINT orgfk FOREIGN KEY (org)
-						REFERENCES org (name) `, 
-		libschema.After("orgs", "createOrgTable")),
-	)
+```go
+database.Migrations("users",
+	...
+	lspostgres.Simple("addOrg", `
+			ALTER TABLE users
+				ADD COLUMN org TEXT,
+				ADD ADD CONSTRAINT orgfk FOREIGN KEY (org)
+					REFERENCES org (name) `, 
+	libschema.After("orgs", "createOrgTable")),
+)
 
-	database.Migrations("orgs",
+database.Migrations("orgs",
+	...
+	lspostgres.Simple("createOrgTable", `
 		...
-		lspostgres.Simple("createOrgTable", `
-			...
-		`),
-	)
+	`),
+)
+```
 
 ## Transactions
 
@@ -165,15 +174,19 @@ libschema currently supports: PostgreSQL, MySQL.  It is easy to add additional d
 
 Libschema does not support reverse migrations.  If you need to fix a migration, fix forward.
 The history behind this is that reverse migrations are rarely the right answer for production
-system and the extra work for maintaining reverse migrations is does not have enough of a 
+systems and the extra work for maintaining reverse migrations is does not have enough of a 
 payoff during development to be worth the effort.
 
 One way to get the benefits of reverse migrations for development is to put enough enough
 reverse migrations to reverse to the last production schema at the end of the migration 
 list but protected by a gateway:
 
-	libschema.SkipThisAndRemainingIf(func() bool {
-		return os.Getenv("LIBMIGRATE_REVERSE_TO_PROD") != "true"
-	}),
+```go
+libschema.SkipThisAndRemainingIf(func() bool {
+	return os.Getenv("LIBMIGRATE_REVERSE_TO_PROD") != "true"
+}),
+```
 
+This set of reverse migrations would always be small since it would just be enough to take you
+back to the current production release.
 
