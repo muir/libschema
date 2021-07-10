@@ -14,7 +14,7 @@ Install:
 Libschema provides a way for Go libraries to manage their own migrations.
 
 Trying migrations to libraries supports two things: the first is source code
-locatality: the migrations can be next to the code that uses the tables that
+locality: the migrations can be next to the code that uses the tables that
 the migrations address.
 
 The second is support for migrations in third-party libraries.  This is a relatively
