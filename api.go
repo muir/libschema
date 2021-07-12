@@ -42,11 +42,13 @@ type MigrationOption func(Migration)
 
 // Migration defines a single database defintion update.
 type MigrationBase struct {
-	Name     MigrationName
-	async    bool
-	rawAfter []MigrationName
-	order    int // overall desired ordring across all libraries, ignores runAfter
-	status   MigrationStatus
+	Name          MigrationName
+	async         bool
+	rawAfter      []MigrationName
+	order         int // overall desired ordring across all libraries, ignores runAfter
+	status        MigrationStatus
+	idempotent    bool
+	idempotentSet bool
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -66,9 +68,8 @@ type Migration interface {
 
 // MigrationStatus tracks if a migration is complete or not.
 type MigrationStatus struct {
-	Done    bool
-	Partial string // for Mysql, the string represents the portion of multiple commands that have completed
-	Error   string // If an attempt was made but failed, this will be set
+	Done  bool
+	Error string // If an attempt was made but failed, this will be set
 }
 
 // Database tracks all of the migrations for a specific database.
