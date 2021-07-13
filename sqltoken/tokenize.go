@@ -42,37 +42,52 @@ type Config struct {
 	// Tokenize ? as type Question (used by MySQL)
 	NoticeQuestionMark bool
 
-	// Tokenize $7 as type DollarNumber (used by PostgreSQL)
+	// Tokenize $7 as type DollarNumber (PostgreSQL)
 	NoticeDollarNumber bool
 
-	// Tokenize :word as type ColonWord (used by sqlx)
+	// Tokenize :word as type ColonWord (sqlx)
 	NoticeColonWord bool
 
-	// Tokenize # as type comment (used by MySQL)
+	// Tokenize # as type comment (MySQL)
 	NoticeHashComment bool
 
-	// $q$ stuff $q$ and $$stuff$$ quoting (used by PostgreSQL)
+	// $q$ stuff $q$ and $$stuff$$ quoting (PostgreSQL)
 	NoticeDollarQuotes bool
 
-	// NoticeHexValues 0xa0 (used by MySQL)
+	// NoticeHexValues 0xa0 x'af' X'AF' (MySQL)
 	NoticeHexNumbers bool
+
+	// NoticeBinaryValues 0x01 b'01' B'01' (MySQL)
+	NoticeBinaryNumbers bool
+
+	// NoticeUAmpPrefix U& utf prefix U&"\0441\043B\043E\043D" (PostgreSQL)
+	NoticeUAmpPrefix bool
 }
 
 type Tokens []Token
 
+func MySQLConfig() Config {
+	return Config{
+		NoticeQuestionMark:  true,
+		NoticeHashComment:   true,
+		NoticeHexNumbers:    true,
+		NoticeBinaryNumbers: true,
+	}
+}
+func PostgreSQLConfig() Config {
+	return Config{
+		NoticeDollarNumber: true,
+		NoticeDollarQuotes: true,
+		NoticeUAmpPrefix:   true,
+	}
+}
+
 func TokenizeMySQL(s string) Tokens {
-	return Tokenize(s, Config{
-		NoticeQuestionMark: true,
-		NoticeHashComment:  true,
-		NoticeHexNumbers:   true,
-	})
+	return Tokenize(s, MySQLConfig())
 }
 
 func TokenizePostgreSQL(s string) Tokens {
-	return Tokenize(s, Config{
-		NoticeDollarNumber: true,
-		NoticeDollarQuotes: true,
-	})
+	return Tokenize(s, PostgreSQLConfig())
 }
 
 // Tokenize breaks up SQL strings into Token objects.  No attempt is made
@@ -158,7 +173,7 @@ BaseState:
 			token(Punctuation)
 		case 'U':
 			// U&'d\0061t\+000061'
-			if i+1 < len(s) && s[i] == '&' && s[i+1] == '\'' {
+			if config.NoticeUAmpPrefix && i+1 < len(s) && s[i] == '&' && s[i+1] == '\'' {
 				i += 2
 				goto SingleQuoteString
 			}
@@ -166,12 +181,19 @@ BaseState:
 		case 'x', 'X':
 			// X'1f' x'1f'
 			if config.NoticeHexNumbers && i < len(s) && s[i] == '\'' {
+				i++
 				goto QuotedHexNumber
 			}
 			goto Word
-		case 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+		case 'b', 'B':
+			if config.NoticeBinaryNumbers && i < len(s) && s[i] == '\'' {
+				i++
+				goto QuotedBinaryNumber
+			}
+			goto Word
+		case 'a' /*b*/, 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
 			'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w' /*x*/, 'y', 'z',
-			'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+			'A' /*B*/, 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
 			'N', 'O', 'P', 'Q', 'R', 'S', 'T' /*U*/, 'V', 'W' /*X*/, 'Y', 'Z',
 			'_':
 			goto Word
@@ -179,6 +201,10 @@ BaseState:
 			if config.NoticeHexNumbers && i < len(s) && s[i] == 'x' {
 				i++
 				goto HexNumber
+			}
+			if config.NoticeBinaryNumbers && i < len(s) && s[i] == 'b' {
+				i++
+				goto BinaryNumber
 			}
 			goto Number
 		case /*0*/ '1', '2', '3', '4', '5', '6', '7', '8', '9':
@@ -318,6 +344,7 @@ PossibleNumber:
 	goto Done
 
 Number:
+	fmt.Println("number")
 	for i < len(s) {
 		c := s[i]
 		i++
@@ -334,11 +361,13 @@ Number:
 					goto Exponent
 				}
 			}
+			i--
 			token(Number)
 			goto Word
 		default:
 			r, w := utf8.DecodeRuneInString(s[i-1:])
 			if !unicode.IsDigit(r) {
+				i--
 				token(Number)
 				goto BaseState
 			}
@@ -349,6 +378,7 @@ Number:
 	goto Done
 
 NumberNoDot:
+	fmt.Println("number-no-dot")
 	for i < len(s) {
 		c := s[i]
 		i++
@@ -363,11 +393,13 @@ NumberNoDot:
 					goto Exponent
 				}
 			}
+			i--
 			token(Number)
 			goto Word
 		default:
 			r, w := utf8.DecodeRuneInString(s[i-1:])
 			if !unicode.IsDigit(r) {
+				i--
 				token(Number)
 				goto BaseState
 			}
@@ -378,6 +410,29 @@ NumberNoDot:
 	goto Done
 
 Exponent:
+	fmt.Println("exponent")
+	if i < len(s) {
+		c := s[i]
+		i++
+		switch c {
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			goto ExponentConfirmed
+		default:
+			r, w := utf8.DecodeRuneInString(s[i-1:])
+			if !unicode.IsDigit(r) {
+				i -= 1
+				token(Number)
+				goto BaseState
+			}
+			i += w - 1
+			goto ExponentConfirmed
+		}
+	}
+	token(Number)
+	goto BaseState
+
+ExponentConfirmed:
+	fmt.Println("exponent confirmed")
 	for i < len(s) {
 		c := s[i]
 		i++
@@ -387,6 +442,7 @@ Exponent:
 		default:
 			r, w := utf8.DecodeRuneInString(s[i-1:])
 			if !unicode.IsDigit(r) {
+				i--
 				token(Number)
 				goto BaseState
 			}
@@ -406,6 +462,23 @@ HexNumber:
 			'A', 'B', 'C', 'D', 'E', 'F':
 			// okay
 		default:
+			i--
+			token(Number)
+			goto BaseState
+		}
+	}
+	token(Number)
+	goto Done
+
+BinaryNumber:
+	for i < len(s) {
+		c := s[i]
+		i++
+		switch c {
+		case '0', '1':
+			// okay
+		default:
+			i--
 			token(Number)
 			goto BaseState
 		}
@@ -442,10 +515,29 @@ QuotedHexNumber:
 			'A', 'B', 'C', 'D', 'E', 'F':
 			// okay
 		case '\'':
-			i++
 			token(Number)
 			goto BaseState
 		default:
+			i--
+			token(Number)
+			goto BaseState
+		}
+	}
+	token(Number)
+	goto Done
+
+QuotedBinaryNumber:
+	for i < len(s) {
+		c := s[i]
+		i++
+		switch c {
+		case '0', '1':
+			// okay
+		case '\'':
+			token(Number)
+			goto BaseState
+		default:
+			i--
 			token(Number)
 			goto BaseState
 		}
@@ -487,7 +579,7 @@ Dollar:
 							token(Punctuation)
 							goto BaseState
 						}
-						i += e + len(endToken) + 1
+						i += e + len(endToken)
 						token(Literal)
 						goto BaseState
 					} else if unicode.IsLetter(r) {
@@ -512,9 +604,11 @@ Dollar:
 					case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 						continue
 					}
-					token(DollarNumber)
-					goto BaseState
+					i--
+					break
 				}
+				token(DollarNumber)
+				goto BaseState
 			}
 		}
 		token(Punctuation)
