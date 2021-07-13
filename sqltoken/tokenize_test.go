@@ -253,6 +253,124 @@ var commonCases = []Tokens{
 		{Type: Word, Text: "e"},
 		{Type: Whitespace, Text: " "},
 	},
+	{
+		{Type: Word, Text: "c33"},
+		{Type: Whitespace, Text: " "},
+		{Type: Word, Text: "eèҾ"},
+		{Type: Whitespace, Text: " "},
+		{Type: Word, Text: "ҾeèҾ"},
+	},
+	{
+		{Type: Word, Text: "c34"},
+		{Type: Whitespace, Text: " "},
+		{Type: Punctuation, Text: "⁖"},
+		{Type: Whitespace, Text: " "},
+		{Type: Punctuation, Text: "+⁖"},
+		{Type: Whitespace, Text: " "},
+		{Type: Punctuation, Text: "+⁖*"},
+	},
+	{
+		{Type: Word, Text: "c35"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "๒"},
+	},
+	{
+		{Type: Word, Text: "c36"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "๒"},
+		{Type: Whitespace, Text: " "},
+	},
+	{
+		{Type: Word, Text: "c37"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "๒⎖๒"},
+		{Type: Whitespace, Text: " "},
+	},
+	{
+		{Type: Word, Text: "c38"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "⎖๒"},
+		{Type: Whitespace, Text: " "},
+	},
+	{
+		{Type: Word, Text: "c39"},
+		{Type: Whitespace, Text: " "},
+		{Type: Comment, Text: "-- comment w/o end"},
+	},
+	{
+		{Type: Word, Text: "c40"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: ".๒"},
+		{Type: Whitespace, Text: " "},
+	},
+	{
+		{Type: Word, Text: "c40"},
+		{Type: Whitespace, Text: " "},
+		{Type: Word, Text: "abnormal"},
+		{Type: Whitespace, Text: " "}, // this is a unicode space character
+		{Type: Word, Text: "space"},
+	},
+	{
+		{Type: Word, Text: "c41"},
+		{Type: Whitespace, Text: " "},
+		{Type: Word, Text: "abnormal"},
+		{Type: Whitespace, Text: "  "}, // this is a unicode space character
+		{Type: Word, Text: "space"},
+	},
+	{
+		{Type: Word, Text: "c42"},
+		{Type: Whitespace, Text: " "},
+		{Type: Word, Text: "abnormal"},
+		{Type: Whitespace, Text: "  "}, // this is a unicode space character
+		{Type: Word, Text: "space"},
+	},
+	{
+		{Type: Word, Text: "c43"},
+		{Type: Whitespace, Text: " "},
+		{Type: Punctuation, Text: "."},
+	},
+	{
+		{Type: Word, Text: "c44"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "๒๒"},
+		{Type: Whitespace, Text: " "},
+	},
+	{
+		{Type: Word, Text: "c45"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "3e๒๒๒"},
+		{Type: Whitespace, Text: " "},
+	},
+	{
+		{Type: Word, Text: "c46"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "3.7"},
+	},
+	{
+		{Type: Word, Text: "c47"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "3.7e19"},
+	},
+	{
+		{Type: Word, Text: "c48"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "3.7e2"},
+	},
+	{
+		{Type: Word, Text: "c49"},
+		{Type: Whitespace, Text: " "},
+		{Type: Punctuation, Text: "😀"}, // I'm not sure I agree with the classification
+	},
+	{
+		{Type: Word, Text: "c50"},
+		{Type: Whitespace, Text: " \x00"},
+	},
+	{
+		{Type: Word, Text: "c51"},
+		{Type: Whitespace, Text: " "},
+		{Type: Word, Text: "x"},
+		{Type: Whitespace, Text: "\x00"},
+	},
 }
 
 var mySQLCases = []Tokens{
@@ -346,6 +464,16 @@ var mySQLCases = []Tokens{
 		{Type: Punctuation, Text: "$$"},
 		{Type: Whitespace, Text: " "},
 	},
+	{
+		{Type: Word, Text: "m12"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "b'10"},
+	},
+	{
+		{Type: Word, Text: "m13"},
+		{Type: Whitespace, Text: " "},
+		{Type: Number, Text: "x'1f"},
+	},
 }
 
 var postgreSQLCases = []Tokens{
@@ -438,6 +566,29 @@ var postgreSQLCases = []Tokens{
 		{Type: Punctuation, Text: "$"},
 		{Type: Word, Text: "q"},
 		{Type: Punctuation, Text: "$"},
+		{Type: Whitespace, Text: " "},
+	},
+	{
+		{Type: Word, Text: "p14"},
+		{Type: Whitespace, Text: " "},
+		{Type: Literal, Text: "$ҾeèҾ$ $ DLa 32498 $ҾeèҾ$"},
+		{Type: Punctuation, Text: "$"},
+	},
+	{
+		{Type: Word, Text: "p15"},
+		{Type: Whitespace, Text: " "},
+		{Type: Literal, Text: "$ҾeèҾ$ $ DLa 32498 $ҾeèҾ$"},
+	},
+	{
+		{Type: Word, Text: "p16"},
+		{Type: Whitespace, Text: " "},
+		{Type: Punctuation, Text: "$"},
+		{Type: Word, Text: "foo"},
+		{Type: Punctuation, Text: "-$"},
+		{Type: Word, Text: "bar"},
+		{Type: Punctuation, Text: "$"},
+		{Type: Word, Text: "foo"},
+		{Type: Punctuation, Text: "-$"},
 		{Type: Whitespace, Text: " "},
 	},
 }

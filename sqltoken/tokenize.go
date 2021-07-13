@@ -90,6 +90,8 @@ func TokenizePostgreSQL(s string) Tokens {
 	return Tokenize(s, PostgreSQLConfig())
 }
 
+const debug = false
+
 // Tokenize breaks up SQL strings into Token objects.  No attempt is made
 // to break successive punctuation.
 func Tokenize(s string, config Config) Tokens {
@@ -109,7 +111,9 @@ func Tokenize(s string, config Config) Tokens {
 	// well do goto the natural way.
 
 	token := func(t TokenType) {
-		fmt.Printf("> %s: {%s}\n", t, s[tokenStart:i])
+		if debug {
+			fmt.Printf("> %s: {%s}\n", t, s[tokenStart:i])
+		}
 		if i-tokenStart == 0 {
 			return
 		}
@@ -212,14 +216,20 @@ BaseState:
 		default:
 			r, w := utf8.DecodeRuneInString(s[i-1:])
 			switch {
+			case r == '⎖':
+				i += w - 1
+				goto NumberNoDot
 			case unicode.IsDigit(r):
+				i += w - 1
 				goto Number
 			case unicode.IsPunct(r) || unicode.IsSymbol(r) || unicode.IsMark(r):
 				i += w - 1
 				token(Punctuation)
 			case unicode.IsLetter(r):
+				i += w - 1
 				goto Word
 			case unicode.IsControl(r) || unicode.IsSpace(r):
+				i += w - 1
 				goto Whitespace
 			default:
 				i += w - 1
@@ -330,10 +340,9 @@ PossibleNumber:
 			i++
 			goto NumberNoDot
 		default:
-			r, w := utf8.DecodeRuneInString(s[i-1:])
-			i += w - 1
+			r, w := utf8.DecodeRuneInString(s[i:])
+			i += w
 			if unicode.IsDigit(r) {
-				i++
 				goto NumberNoDot
 			}
 			token(Punctuation)
@@ -344,7 +353,6 @@ PossibleNumber:
 	goto Done
 
 Number:
-	fmt.Println("number")
 	for i < len(s) {
 		c := s[i]
 		i++
@@ -360,12 +368,21 @@ Number:
 					i++
 					goto Exponent
 				}
+				r, w := utf8.DecodeRuneInString(s[i:])
+				if unicode.IsDigit(r) {
+					i += w
+					goto Exponent
+				}
 			}
 			i--
 			token(Number)
 			goto Word
 		default:
 			r, w := utf8.DecodeRuneInString(s[i-1:])
+			if r == '⎖' {
+				i += w - 1
+				goto NumberNoDot
+			}
 			if !unicode.IsDigit(r) {
 				i--
 				token(Number)
@@ -378,7 +395,6 @@ Number:
 	goto Done
 
 NumberNoDot:
-	fmt.Println("number-no-dot")
 	for i < len(s) {
 		c := s[i]
 		i++
@@ -410,7 +426,6 @@ NumberNoDot:
 	goto Done
 
 Exponent:
-	fmt.Println("exponent")
 	if i < len(s) {
 		c := s[i]
 		i++
@@ -432,7 +447,6 @@ Exponent:
 	goto BaseState
 
 ExponentConfirmed:
-	fmt.Println("exponent confirmed")
 	for i < len(s) {
 		c := s[i]
 		i++
@@ -545,10 +559,10 @@ QuotedBinaryNumber:
 	token(Number)
 	goto Done
 
+Dollar:
 	// $1
 	// $seq$ stuff $seq$
 	// $$stuff$$
-Dollar:
 	firstDollarEnd = i
 	if i < len(s) {
 		c := s[i]
