@@ -62,16 +62,20 @@ type Config struct {
 
 	// NoticeUAmpPrefix U& utf prefix U&"\0441\043B\043E\043D" (PostgreSQL)
 	NoticeUAmpPrefix bool
+
+	// NoticeCharsetLiteral _latin1'string' n'string' (MySQL)
+	NoticeCharsetLiteral bool
 }
 
 type Tokens []Token
 
 func MySQLConfig() Config {
 	return Config{
-		NoticeQuestionMark:  true,
-		NoticeHashComment:   true,
-		NoticeHexNumbers:    true,
-		NoticeBinaryNumbers: true,
+		NoticeQuestionMark:   true,
+		NoticeHashComment:    true,
+		NoticeHexNumbers:     true,
+		NoticeBinaryNumbers:  true,
+		NoticeCharsetLiteral: true,
 	}
 }
 func PostgreSQLConfig() Config {
@@ -320,6 +324,19 @@ Word:
 			'0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 			i++
 			continue
+		case '\'':
+			if config.NoticeCharsetLiteral {
+				switch s[tokenStart] {
+				case 'n', 'N':
+					if i-tokenStart == 1 {
+						i++
+						goto SingleQuoteString
+					}
+				case '_':
+					i++
+					goto SingleQuoteString
+				}
+			}
 		}
 		r, w := utf8.DecodeRuneInString(s[i:])
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
