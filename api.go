@@ -42,13 +42,15 @@ type MigrationOption func(Migration)
 
 // Migration defines a single database defintion update.
 type MigrationBase struct {
-	Name          MigrationName
-	async         bool
-	rawAfter      []MigrationName
-	order         int // overall desired ordring across all libraries, ignores runAfter
-	status        MigrationStatus
-	idempotent    bool
-	idempotentSet bool
+	Name            MigrationName
+	async           bool
+	rawAfter        []MigrationName
+	order           int // overall desired ordring across all libraries, ignores runAfter
+	status          MigrationStatus
+	idempotent      bool
+	idempotentSet   bool
+	skipIf          func() (bool, error)
+	skipRemainingIf func() (bool, error)
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -201,6 +203,18 @@ func After(lib, migration string) MigrationOption {
 			Name:    migration,
 		}
 		base.rawAfter = rawAfter
+	}
+}
+
+func SkipIf(pred func() (bool, error)) MigrationOption {
+	return func(m Migration) {
+		m.Base().skipIf = pred
+	}
+}
+
+func SkipRemainingIf(pred func() (bool, error)) MigrationOption {
+	return func(m Migration) {
+		m.Base().skipRemainingIf = pred
 	}
 }
 
