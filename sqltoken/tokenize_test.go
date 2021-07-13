@@ -374,6 +374,12 @@ var commonCases = []Tokens{
 	{
 		{Type: Comment, Text: "-- c52\n"},
 	},
+	{
+		{Type: Word, Text: "c53"},
+		{Type: Whitespace, Text: " "},
+		{Type: Word, Text: "z"},
+		{Type: Literal, Text: "'not a prefixed literal'"},
+	},
 }
 
 var mySQLCases = []Tokens{
@@ -476,6 +482,16 @@ var mySQLCases = []Tokens{
 		{Type: Word, Text: "m13"},
 		{Type: Whitespace, Text: " "},
 		{Type: Number, Text: "x'1f"},
+	},
+	{
+		{Type: Word, Text: "m14"},
+		{Type: Whitespace, Text: " "},
+		{Type: Literal, Text: "n'national charset'"},
+	},
+	{
+		{Type: Word, Text: "m14"},
+		{Type: Whitespace, Text: " "},
+		{Type: Literal, Text: "_utf8'redundent'"},
 	},
 }
 
@@ -593,6 +609,18 @@ var postgreSQLCases = []Tokens{
 		{Type: Word, Text: "foo"},
 		{Type: Punctuation, Text: "-$"},
 		{Type: Whitespace, Text: " "},
+	},
+	{
+		{Type: Word, Text: "p16"},
+		{Type: Whitespace, Text: " "},
+		{Type: Word, Text: "n"},
+		{Type: Literal, Text: "'mysql only'"},
+	},
+	{
+		{Type: Word, Text: "p16"},
+		{Type: Whitespace, Text: " "},
+		{Type: Word, Text: "_utf8"},
+		{Type: Literal, Text: "'mysql only'"},
 	},
 }
 
