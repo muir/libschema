@@ -371,6 +371,9 @@ var commonCases = []Tokens{
 		{Type: Word, Text: "x"},
 		{Type: Whitespace, Text: "\x00"},
 	},
+	{
+		{Type: Comment, Text: "-- c52\n"},
+	},
 }
 
 var mySQLCases = []Tokens{
@@ -644,5 +647,29 @@ func TestPostgresSQLTokenizing(t *testing.T) {
 	}
 	for _, tc := range postgreSQLCases {
 		testPostgreSQL(t, tc)
+	}
+}
+
+func TestStrip(t *testing.T) {
+	cases := []struct {
+		before string
+		after  string
+	}{
+		{
+			before: "",
+			after:  "",
+		},
+		{
+			before: "-- stuff\n",
+			after:  "",
+		},
+		{
+			before: " /* foo */ bar \n baz  ; ",
+			after:  "bar baz",
+		},
+	}
+	for _, tc := range cases {
+		ts := TokenizeMySQL(tc.before)
+		require.Equal(t, tc.after, ts.Strip().String(), tc.before)
 	}
 }

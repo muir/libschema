@@ -642,3 +642,39 @@ func (ts Tokens) String() string {
 	}
 	return strings.Join(strs, "")
 }
+
+// Strip removes leading/trailing whitespace and semicolors
+// and strips all internal comments.  Internal whitespace
+// is changed to a single space.
+func (ts Tokens) Strip() Tokens {
+	i := 0
+	for i < len(ts) {
+		switch ts[i].Type {
+		case Comment, Whitespace, Semicolon:
+			i++
+			continue
+		}
+		break
+	}
+	c := make(Tokens, 0, len(ts))
+	var lastReal int
+	for i < len(ts) {
+		switch ts[i].Type {
+		case Comment:
+			continue
+		case Whitespace:
+			c = append(c, Token{
+				Type: Whitespace,
+				Text: " ",
+			})
+		case Semicolon:
+			c = append(c, ts[i])
+		default:
+			c = append(c, ts[i])
+			lastReal = len(c)
+		}
+		i++
+	}
+	c = c[:lastReal]
+	return c
+}
