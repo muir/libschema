@@ -701,3 +701,31 @@ func TestStrip(t *testing.T) {
 		require.Equal(t, tc.after, ts.Strip().String(), tc.before)
 	}
 }
+
+func TestCmdSplit(t *testing.T) {
+	cases := []struct {
+		input string
+		want  []string
+	}{
+		{
+			input: "",
+			want:  []string{},
+		},
+		{
+			input: "-- stuff\n",
+			want:  []string{},
+		},
+		{
+			input: " /* foo */ bar \n baz  ; ",
+			want:  []string{"bar baz"},
+		},
+		{
+			input: " /* foo */ bar \n ;baz  ; ",
+			want:  []string{"bar", "baz"},
+		},
+	}
+	for _, tc := range cases {
+		ts := TokenizeMySQL(tc.input)
+		require.Equal(t, tc.want, ts.CmdSplit().Strings(), tc.input)
+	}
+}

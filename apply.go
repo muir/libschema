@@ -214,7 +214,7 @@ func (d *Database) migrate(ctx context.Context) (err error) {
 		}
 		var stop bool
 		stop, err = d.doOneMigration(ctx, m)
-		if err != nil || err {
+		if err != nil || stop {
 			return err
 		}
 	}
@@ -232,7 +232,7 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 	if m.Base().skipIf != nil {
 		skip, err := m.Base().skipIf()
 		if err != nil {
-			return errors.Wrapf(err, "SkipIf %s", m.Base().Name)
+			return false, errors.Wrapf(err, "SkipIf %s", m.Base().Name)
 		}
 		if skip {
 			return false, nil
@@ -241,7 +241,7 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 	if m.Base().skipRemainingIf != nil {
 		skip, err := m.Base().skipRemainingIf()
 		if err != nil {
-			return errors.Wrapf(err, "SkipRemainingIf %s", m.Base().Name)
+			return false, errors.Wrapf(err, "SkipRemainingIf %s", m.Base().Name)
 		}
 		if skip {
 			return true, nil
