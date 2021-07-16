@@ -69,14 +69,14 @@ database, mysql, err := lsmysql.New(logger, "main-db", schema, sqlDB)
 
 database.Migrations("MyLibrary",
 	lsmysql.Script("createUserTable", `
-		CREATE TAGLE users (
+		CREATE TABLE users (
 			name	text,
 			id	bigint,
 			PRIMARY KEY (id)
 		) ENGINE=InnoDB`
 	}),
 	lsmysql.Script("dropUserPK", `
-		ALTAR TABLE users
+		ALTER TABLE users
 			DROP PRIMARY KEY`,
 		libschema.SkipIf(func() (bool, error) {
 			hasPK, err := mysql.HasPrimaryKey("users")
