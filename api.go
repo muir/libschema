@@ -47,8 +47,6 @@ type MigrationBase struct {
 	rawAfter        []MigrationName
 	order           int // overall desired ordring across all libraries, ignores runAfter
 	status          MigrationStatus
-	idempotent      bool
-	idempotentSet   bool
 	skipIf          func() (bool, error)
 	skipRemainingIf func() (bool, error)
 }
