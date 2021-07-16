@@ -132,3 +132,49 @@ func TestMysqlHappyPath(t *testing.T) {
 	}
 	assert.Equal(t, []string{"T1", "T2", "T3", "T4", "tracking_table"}, names, "table names")
 }
+
+func TestMysqlNotAllowed(t *testing.T) {
+	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
+	}
+
+	cases := []struct {
+		name      string
+		migration string
+		errorText string
+	}{
+		{
+			name:      "combines",
+			migration: `CREATE TABLE T1 (id text) ENGINE=InnoDB; INSERT INTO T1 (id) VALUES ('x');`,
+			errorText: "Migration combines DDL",
+		},
+		{
+			name:      "unconditional",
+			migration: `CREATE TABLE T1 (id text) ENGINE=InnoDB`,
+			errorText: "Unconditional migration has non-idempotent",
+		},
+	}
+
+	for _, tc := range cases {
+
+		options, cleanup := lstesting.FakeSchema(t, "")
+		options.DebugLogging = true
+		s := libschema.New(context.Background(), options)
+
+		db, err := sql.Open("mysql", dsn)
+		require.NoError(t, err, "open database")
+		defer db.Close()
+		defer cleanup(db)
+
+		dbase, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
+		require.NoError(t, err, "libschema NewDatabase")
+
+		dbase.Migrations("L1", lsmysql.Script("x", tc.migration))
+
+		err = s.Migrate(context.Background())
+		if assert.Error(t, err, tc.name) {
+			assert.Contains(t, err.Error(), tc.errorText, tc.name)
+		}
+	}
+}
