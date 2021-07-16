@@ -28,6 +28,6 @@ jobs:
 
       - name: Test
         env:
-	  LIBSCHEMA_POSTGRES_TEST_DSN: "postgres://postgres:postgres@postgres"
+          LIBSCHEMA_POSTGRES_TEST_DSN: "postgres://postgres:postgres@postgres"
         run: go test -v lspostgres/...
 
