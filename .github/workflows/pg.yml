@@ -26,6 +26,9 @@ jobs:
         with:
           go-version: 1.16
 
+      - name: Build
+        run: go build -v ./...
+
       - name: Test
         env:
           LIBSCHEMA_POSTGRES_TEST_DSN: "postgres://postgres:postgres@postgres"
