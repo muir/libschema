@@ -52,7 +52,7 @@ func TestMysqlHappyPath(t *testing.T) {
 	defer db.Close()
 	defer cleanup(db)
 
-	dbase, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
+	dbase, _, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	dbase.Migrations("L1",
@@ -157,7 +157,6 @@ func TestMysqlNotAllowed(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-
 		options, cleanup := lstesting.FakeSchema(t, "")
 		options.DebugLogging = true
 		s := libschema.New(context.Background(), options)
@@ -167,7 +166,7 @@ func TestMysqlNotAllowed(t *testing.T) {
 		defer db.Close()
 		defer cleanup(db)
 
-		dbase, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
+		dbase, _, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
 		require.NoError(t, err, "libschema NewDatabase")
 
 		dbase.Migrations("L1", lsmysql.Script("x", tc.migration))
@@ -177,4 +176,83 @@ func TestMysqlNotAllowed(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.errorText, tc.name)
 		}
 	}
+}
+
+func TestSkipFunctions(t *testing.T) {
+	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
+	}
+
+	options, cleanup := lstesting.FakeSchema(t, "")
+	options.DebugLogging = true
+	s := libschema.New(context.Background(), options)
+
+	db, err := sql.Open("mysql", dsn)
+	require.NoError(t, err, "open database")
+	defer db.Close()
+	defer cleanup(db)
+
+	dbase, m, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
+	require.NoError(t, err, "libschema NewDatabase")
+
+	dbase.Migrations("T",
+		lsmysql.Script("setup1", `
+			CREATE TABLE IF NOT EXISTS users (
+				id	varchar(255),
+				level	integer DEFAULT 37,
+				PRIMARY KEY (id)
+			) ENGINE=InnoDB`),
+		lsmysql.Script("setup2", `
+			CREATE TABLE IF NOT EXISTS accounts (
+				id	varchar(255)
+			) ENGINE=InnoDB`),
+		lsmysql.Script("setup3", `
+			ALTER TABLE users
+				ADD CONSTRAINT hi_level 
+					CHECK (level > 10) ENFORCED`,
+			libschema.SkipIf(func() (bool, error) {
+				t, _, err := m.GetTableConstraint("users", "hi_level")
+				return t != "", err
+			})),
+	)
+
+	err = s.Migrate(context.Background())
+	assert.NoError(t, err)
+
+	hasPK, err := m.HasPrimaryKey("users")
+	if assert.NoError(t, err, "users has pk") {
+		assert.True(t, hasPK, "users has pk")
+	}
+	hasPK, err = m.HasPrimaryKey("accounts")
+	if assert.NoError(t, err, "accounts has pk") {
+		assert.False(t, hasPK, "accounts has pk")
+	}
+	dflt, err := m.ColumnDefault("users", "id")
+	if assert.NoError(t, err, "user id default") {
+		assert.Nil(t, dflt, "user id default")
+	}
+	dflt, err = m.ColumnDefault("users", "level")
+	if assert.NoError(t, err, "user level default") {
+		if assert.NotNil(t, dflt, "user level default") {
+			assert.Equal(t, "37", *dflt, "user id default")
+		}
+	}
+	exists, err := m.DoesColumnExist("users", "foo")
+	if assert.NoError(t, err, "users has foo") {
+		assert.False(t, exists, "users has foo")
+	}
+	exists, err = m.DoesColumnExist("users", "level")
+	if assert.NoError(t, err, "users has level") {
+		assert.True(t, exists, "users has level")
+	}
+	typ, enf, err := m.GetTableConstraint("users", "hi_level")
+	if assert.NoError(t, err, "users hi_level constraint") {
+		assert.Equal(t, "CHECK", typ, "users hi_level constraint")
+		assert.True(t, enf, "users hi_level constraint")
+	}
+}
+
+func pointerToString(s string) *string {
+	return &s
 }

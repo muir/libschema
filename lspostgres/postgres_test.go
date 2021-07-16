@@ -23,7 +23,7 @@ func TestPostgresMigrations(t *testing.T) {
 
 	var actions []string
 
-	options, cleanup := lstesting.FakeSchema(t)
+	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
 
 	options.ErrorOnUnknownMigrations = true
 	options.OnMigrationFailure = func(name libschema.MigrationName, err error) {

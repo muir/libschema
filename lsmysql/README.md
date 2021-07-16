@@ -56,7 +56,34 @@ ALTER TABLE ...
 ```
 
 To help make these conditional, the lsmysql provides some helper functions to easily
-check some of these:
+check the current database state.
+
+For example:
+
+```go
+schema := libschema.NewSchema(ctx, libschema.Options{})
+
+sqlDB, err := sql.Open("mysql", "....")
+
+database, mysql, err := lsmysql.New(logger, "main-db", schema, sqlDB)
+
+database.Migrations("MyLibrary",
+	lsmysql.Script("createUserTable", `
+		CREATE TAGLE users (
+			name	text,
+			id	bigint,
+			PRIMARY KEY (id)
+		) ENGINE=InnoDB`
+	}),
+	lsmysql.Script("dropUserPK", `
+		ALTAR TABLE users
+			DROP PRIMARY KEY`,
+		libschema.SkipIf(func() (bool, error) {
+			hasPK, err := mysql.HasPrimaryKey("users")
+			return !hasPK, err
+		})),
+	)
+```
 
 ### Some notes on MySQL
 
