@@ -65,7 +65,7 @@ func Generate(
 	}.applyOpts(opts)
 }
 
-// Computed creates a libschema.Migration from a Go function to run to do
+// Computed creates a libschema.Migration from a Go function to run
 // the migration directly.
 func Computed(
 	name string,
