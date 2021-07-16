@@ -16,6 +16,8 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+	ports:
+	  - 5432:5432
 
     steps:
       - name: Check out repository code
@@ -31,6 +33,6 @@ jobs:
 
       - name: Test
         env:
-          LIBSCHEMA_POSTGRES_TEST_DSN: "postgres://postgres:postgres@postgres"
+          LIBSCHEMA_POSTGRES_TEST_DSN: "postgres://postgres:postgres@localhost"
         run: go test ./lspostgres/... -v
 
