@@ -4,7 +4,7 @@ on: [ push ]
 jobs:
   Test-postgres-integration:
     runs-on: ubuntu-latest
-    container: ubuntu:latest
+    # container: ubuntu:latest
 
     services:
       postgres:
@@ -25,15 +25,6 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.16
-
-      - name: Attempt to fix 509 issue pt 1
-        run: go env -w GOPROXY=direct
-
-      - name: Attempt to fix 509 issue pt 2
-        run: apk add --no-cache git
-
-      - name: Attempt to fix 509 issue pt 3
-        run: apk --no-cache add ca-certificates
 
       - name: Build
         run: go build -v ./...
