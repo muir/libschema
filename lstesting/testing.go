@@ -28,13 +28,13 @@ type T interface {
 // FakeSchema generates an Options config with a fake random schema name
 // that begins with "lstest_".  It also returns a function to
 // remove that schema -- the function should work with Postgres and Mysql.
-func FakeSchema(t T) (libschema.Options, func(db *sql.DB)) {
+func FakeSchema(t T, cascade string) (libschema.Options, func(db *sql.DB)) {
 	schemaName := "lstest_" + RandomString(15)
 	return libschema.Options{
 			TrackingTable:  schemaName + ".tracking_table",
 			SchemaOverride: schemaName,
 		}, func(db *sql.DB) {
-			_, err := db.Exec(`DROP SCHEMA IF EXISTS ` + schemaName + ` CASCADE`)
+			_, err := db.Exec(`DROP SCHEMA IF EXISTS ` + schemaName + ` ` + cascade)
 			t.Logf("DROPPED %s", schemaName)
 			assert.NoError(t, err, "drop schema")
 		}

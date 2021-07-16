@@ -57,3 +57,14 @@ ALTER TABLE ...
 
 To help make these conditional, the lsmysql provides some helper functions to easily
 check some of these:
+
+### Some notes on MySQL
+
+While most identifiers (table names, etc) can be `"`quoted`"`, you cannot use quotes around
+a schema (database really) name with `CREATE SCHEMA`.
+
+MySQL does not support schemas.  A schema is just a synonym for `DATABASE` in the MySQL world.
+This means that it is easier to put migrations tracking table in the same schema (database) as
+the rest of the tables.  It also means that to run migration unit tests, the DSN for testing
+has to give access to a user that can create and drop databases.
+

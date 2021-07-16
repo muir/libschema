@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 
-	"github.com/lib/pq" // used for QuoteIdentifier
 	"github.com/muir/libschema"
 	"github.com/pkg/errors"
 )
@@ -24,7 +24,8 @@ import (
 // to determine if the transaction succeeded or failed.  Such transactions will be retried.
 // For this reason, it is reccomend that DDL commands be written such that they are idempotent.
 type Mysql struct {
-	lockTx *sql.Tx
+	lockTx  *sql.Tx
+	lockStr string
 }
 
 // New creates a libschema.Database with a mysql driver built in.
@@ -113,7 +114,10 @@ func (p *Mysql) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *l
 		return errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
 	}
 	if d.Options.SchemaOverride != "" {
-		_, err := tx.Exec(`USE ` + pq.QuoteIdentifier(d.Options.SchemaOverride))
+		if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
+			return errors.Errorf("Options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
+		}
+		_, err := tx.Exec(`USE ` + d.Options.SchemaOverride)
 		if err != nil {
 			return errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 		}
@@ -182,31 +186,45 @@ func (p *Mysql) CreateSchemaTableIfNotExists(ctx context.Context, _ libschema.My
 	}
 	_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
-			metadata	varchar(255) NOT NULL DEFAULT '',
 			library		varchar(255) NOT NULL,
 			migration	varchar(255) NOT NULL,
 			done		boolean NOT NULL,
 			error		text NOT NULL,
-			updated_at	timestamp with time zone DEFAULT now(),
-			PRIMARY KEY	(metadata, library, migration)
-		)`, tableName))
+			updated_at	timestamp DEFAULT now(),
+			PRIMARY KEY	(library, migration)
+		) ENGINE = InnoDB`, tableName))
 	if err != nil {
 		return errors.Wrapf(err, "Could not create libschema migrations table '%s'", tableName)
 	}
 	return nil
 }
 
-// TODO: DRY
+var simpleIdentifierRE = regexp.MustCompile(`\A[A-Za-z][A-Za-z0-9_]*\z`)
+
+// When MySQL is in ANSI_QUOTES mode, it allows "table_name" quotes but when
+// it is not then it does not.  There is no prefect option: in ANSI_QUOTES
+// mode, you could have a table called `table` (eg: `CREATE TABLE "table"`) but
+// if you're not in ANSI_QUOTES mode then you cannot.  We're going to assume
+// that we're not in ANSI_QUOTES mode because we cannot assume that we are.
 func trackingSchemaTable(d *libschema.Database) (string, string, error) {
 	tableName := d.Options.TrackingTable
 	s := strings.Split(tableName, ".")
 	switch len(s) {
 	case 2:
-		schema := pq.QuoteIdentifier(s[0])
-		table := pq.QuoteIdentifier(s[1])
+		schema := s[0]
+		if !simpleIdentifierRE.MatchString(schema) {
+			return "", "", errors.Errorf("Tracking table schema name must be a simple identifier, not '%s'", schema)
+		}
+		table := s[1]
+		if !simpleIdentifierRE.MatchString(table) {
+			return "", "", errors.Errorf("Tracking table table name must be a simple identifier, not '%s'", table)
+		}
 		return schema, schema + "." + table, nil
 	case 1:
-		return "", pq.QuoteIdentifier(tableName), nil
+		if !simpleIdentifierRE.MatchString(tableName) {
+			return "", "", errors.Errorf("Tracking table table name must be a simple identifier, not '%s'", tableName)
+		}
+		return "", tableName, nil
 	default:
 		return "", "", errors.Errorf("Tracking table '%s' is not valid", tableName)
 	}
@@ -231,13 +249,8 @@ func (p *Mysql) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.Data
 		"error":     migrationError,
 	})
 	q := fmt.Sprintf(`
-		INSERT INTO %s (library, migration, done, error, updated_at)
-		VALUES ($1, $2, $3, $4, now())
-		ON DUPLICATE KEY UPDATE 
-			done = new.done,
-			error = new.error,
-			updated_at = new.updated_at
-			`, trackingTable(d))
+		REPLACE INTO %s (library, migration, done, error, updated_at)
+		VALUES (?, ?, ?, ?, now())`, trackingTable(d))
 	_, err := tx.Exec(q, m.Base().Name.Library, m.Base().Name.Name, done, estr)
 	if err != nil {
 		return errors.Wrapf(err, "Save status for %s", m.Base().Name)
@@ -248,31 +261,26 @@ func (p *Mysql) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.Data
 // LockMigrationsTable locks the migration tracking table for exclusive use by the
 // migrations running now.
 // It is expected to be called by libschema.
-// TODO: DRY
+// In MySQL, locks are _not_ tied to transactions so closing the transaction
+// does not release the lock.  We'll use a transaction just to make sure that
+// we're using the same connection.
 func (p *Mysql) LockMigrationsTable(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) error {
-	tableName := trackingTable(d)
+	_, tableName, err := trackingSchemaTable(d)
+	if err != nil {
+		return err
+	}
 	if p.lockTx != nil {
 		return errors.Errorf("libschema migrations table, '%s' already locked", tableName)
-	}
-	_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
-		INSERT IGNORE INTO %s (metadata, library, migration, done, error)
-		VALUES ('lock', '', '', true, '')`,
-		tableName))
-	if err != nil {
-		return errors.Wrapf(err, "Could not add lock row to %s", tableName)
 	}
 	tx, err := d.DB().BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return errors.Wrap(err, "Could not start transaction: %s")
 	}
-	var junk string
-	err = tx.QueryRow(fmt.Sprintf(`
-		SELECT	metadata
-		FROM	%s
-		WHERE	metadata = 'lock'
-		FOR UPDATE`, tableName)).Scan(&junk)
+	p.lockStr = "libschema_" + tableName
+	var gotLock int
+	err = tx.QueryRow(`SELECT GET_LOCK(?, -1)`, p.lockStr).Scan(&gotLock)
 	if err != nil {
-		return errors.Wrapf(err, "Could not lock libschema migrations table '%s'", tableName)
+		return errors.Wrapf(err, "Could not get lock for libschema migrations")
 	}
 	p.lockTx = tx
 	return nil
@@ -280,13 +288,18 @@ func (p *Mysql) LockMigrationsTable(ctx context.Context, _ libschema.MyLogger, d
 
 // UnlockMigrationsTable unlocks the migration tracking table.
 // It is expected to be called by libschema.
-// TODO: DRY
 func (p *Mysql) UnlockMigrationsTable(_ libschema.MyLogger) error {
 	if p.lockTx == nil {
 		return errors.Errorf("libschema migrations table, not locked")
 	}
-	_ = p.lockTx.Rollback()
-	p.lockTx = nil
+	defer func() {
+		_ = p.lockTx.Rollback()
+		p.lockTx = nil
+	}()
+	_, err := p.lockTx.Exec(`SELECT RELEASE_LOCK(?)`, p.lockStr)
+	if err != nil {
+		return errors.Wrap(err, "Could not release explicit lock for schema migrations")
+	}
 	return nil
 }
 
@@ -297,8 +310,7 @@ func (p *Mysql) LoadStatus(ctx context.Context, _ libschema.MyLogger, d *libsche
 	tableName := trackingTable(d)
 	rows, err := d.DB().QueryContext(ctx, fmt.Sprintf(`
 		SELECT	library, migration, done
-		FROM	%s
-		WHERE	metadata = ''`, tableName))
+		FROM	%s`, tableName))
 	if err != nil {
 		return nil, errors.Wrap(err, "Cannot query migration status")
 	}

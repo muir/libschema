@@ -16,6 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Since MySQL does not support schemas (it treats them like databases),
+// LIBSCHEMA_MYSQL_TEST_DSN has to give access to a user that can create
+// and destroy databases.
+
 func TestMysqlHappyPath(t *testing.T) {
 	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
 	if dsn == "" {
@@ -24,7 +28,7 @@ func TestMysqlHappyPath(t *testing.T) {
 
 	var actions []string
 
-	options, cleanup := lstesting.FakeSchema(t)
+	options, cleanup := lstesting.FakeSchema(t, "")
 
 	options.ErrorOnUnknownMigrations = true
 	options.OnMigrationFailure = func(name libschema.MigrationName, err error) {
@@ -54,40 +58,49 @@ func TestMysqlHappyPath(t *testing.T) {
 	dbase.Migrations("L1",
 		lsmysql.Generate("T1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
 			actions = append(actions, "MIGRATE: L1.T1")
-			return `CREATE TABLE T1 (id text)`
+			return `CREATE TABLE IF NOT EXISTS T1 (id text) ENGINE = InnoDB`
 		}),
+		lsmysql.Script("T2pre", `
+				INSERT INTO T1 (id) VALUES ('T2');`),
+		lsmysql.Script("T2pre2", `
+				INSERT INTO T3 (id) VALUES ('T2');`,
+			libschema.After("L2", "T3")),
 		lsmysql.Computed("T2", func(_ context.Context, _ libschema.MyLogger, tx *sql.Tx) error {
 			actions = append(actions, "MIGRATE: L1.T2")
 			_, err := tx.Exec(`
-				INSERT INTO T1 (id) VALUES ('T2');
-				INSERT INTO T3 (id) VALUES ('T2');
-				CREATE TABLE T2 (id text)`)
+				CREATE TABLE IF NOT EXISTS T2 (id text) ENGINE = InnoDB`)
 			return err
-		}, libschema.After("L2", "T3")),
+		}),
 		lsmysql.Generate("PT1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
 			actions = append(actions, "MIGRATE: L1.PT1")
 			return `
 				INSERT INTO T1 (id) VALUES ('PT1');
-				INSERT INTO T2 (id) VALUES ('PT1');
-				INSERT INTO T3 (id) VALUES ('PT1');
 			`
 		}),
+		lsmysql.Script("PT1p1", `
+				INSERT INTO T2 (id) VALUES ('PT1');`),
+		lsmysql.Script("PT1p2", `
+				INSERT INTO T3 (id) VALUES ('PT1');`),
 	)
 
 	dbase.Migrations("L2",
+		lsmysql.Script("T3pre", `
+				INSERT INTO T1 (id) VALUES ('T3');`),
 		lsmysql.Generate("T3", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
 			actions = append(actions, "MIGRATE: L2.T3")
 			return `
-				INSERT INTO T1 (id) VALUES ('T3');
-				CREATE TABLE T3 (id text)`
+				CREATE TABLE IF NOT EXISTS T3 (id text) ENGINE = InnoDB`
 		}),
+		lsmysql.Script("T4pre1", `
+				INSERT INTO T1 (id) VALUES ('T4');`),
+		lsmysql.Script("T4pre2", `
+				INSERT INTO T2 (id) VALUES ('T4');`),
+		lsmysql.Script("T4pre3", `
+				INSERT INTO T3 (id) VALUES ('T4');`),
 		lsmysql.Generate("T4", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
 			actions = append(actions, "MIGRATE: L2.T4")
 			return `
-				INSERT INTO T1 (id) VALUES ('T4');
-				INSERT INTO T2 (id) VALUES ('T4');
-				INSERT INTO T3 (id) VALUES ('T4');
-				CREATE TABLE T4 (id text)`
+				CREATE TABLE IF NOT EXISTS T4 (id text) ENGINE = InnoDB`
 		}),
 	)
 
@@ -107,7 +120,7 @@ func TestMysqlHappyPath(t *testing.T) {
 	rows, err := db.Query(`
 		SELECT	table_name
 		FROM	information_schema.tables
-		WHERE	table_schema = $1
+		WHERE	table_schema = ?
 		ORDER	BY table_name`, options.SchemaOverride)
 	require.NoError(t, err, "query for list of tables")
 	defer rows.Close()
@@ -117,5 +130,5 @@ func TestMysqlHappyPath(t *testing.T) {
 		assert.NoError(t, rows.Scan(&name))
 		names = append(names, name)
 	}
-	assert.Equal(t, []string{"t1", "t2", "t3", "t4", "tracking_table"}, names, "table names")
+	assert.Equal(t, []string{"T1", "T2", "T3", "T4", "tracking_table"}, names, "table names")
 }
