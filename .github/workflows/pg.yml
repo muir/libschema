@@ -1,14 +1,12 @@
 name: PostgreSQL tests
-on: push
+on: [ push ]
 
 jobs:
-  # Label of the container job
-  container-job:
+  Test-postgres-integration:
     runs-on: ubuntu-latest
-    container: node:10.18-jessie
+    container: ubuntu-latest
 
     services:
-      # Label used to access the service container
       postgres:
         image: postgres
         env:
