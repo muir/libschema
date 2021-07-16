@@ -26,6 +26,11 @@ jobs:
         with:
           go-version: 1.16
 
+      - name: Attempt to fix 509 issue
+        run: go env -w GOPROXY=direct
+        run: apk add --no-cache git
+        run: apk --no-cache add ca-certificates
+
       - name: Build
         run: go build -v ./...
 
