@@ -33,6 +33,6 @@ jobs:
 
       - name: Test
         env:
-          LIBSCHEMA_POSTGRES_TEST_DSN: "postgres://postgres:postgres@localhost"
+          LIBSCHEMA_POSTGRES_TEST_DSN: "postgres://postgres:postgres@localhost?sslmode=disable"
         run: go test ./lspostgres/... -v
 
