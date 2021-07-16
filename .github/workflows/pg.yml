@@ -4,7 +4,6 @@ on: [ push ]
 jobs:
   Test-postgres-integration:
     runs-on: ubuntu-latest
-    # container: ubuntu:latest
 
     services:
       postgres:
