@@ -227,6 +227,7 @@ BaseState:
 			r, w := utf8.DecodeRuneInString(s[i-1:])
 			switch {
 			case r == '⎖':
+				// "⎖" is the unicode decimal separator -- an alternative to "."
 				i += w - 1
 				goto NumberNoDot
 			case unicode.IsDigit(r):
