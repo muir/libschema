@@ -206,6 +206,10 @@ BaseState:
 			'A' /*B*/, 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
 			'N', 'O', 'P', 'Q', 'R', 'S', 'T' /*U*/, 'V', 'W' /*X*/, 'Y', 'Z',
 			'_':
+			// This covers the entire alphabet except specific letters that have
+			// been handled above.  This case is actually just a performance
+			// hack: if there were a letter missing it would be caught below
+			// by unicode.IsLetter()
 			goto Word
 		case '0':
 			if config.NoticeHexNumbers && i < len(s) && s[i] == 'x' {
@@ -324,6 +328,10 @@ Word:
 			'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
 			'_',
 			'0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			// This covers the entire alphabet and numbers.
+			// This case is actually just a performance
+			// hack: if there were a letter missing it would be caught below
+			// by unicode.IsLetter()
 			i++
 			continue
 		case '\'':
