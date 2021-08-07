@@ -2,6 +2,9 @@
 # libschema - schema migration for libraries
 
 [![GoDoc](https://godoc.org/github.com/muir/libschema?status.png)](https://pkg.go.dev/github.com/muir/libschema)
+![unit tests](https://github.com/muir/libschema/actions/workflows/go.yml/badge.svg)
+![pg tests](https://github.com/muir/libschema/actions/workflows/pg.yml/badge.svg)
+
 
 Install:
 
