@@ -1,0 +1,38 @@
+name: MySQL tests
+on: [ push ]
+
+jobs:
+  Test-mysql-integration:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: libschematest
+          MYSQL_ROOT_PASSWORD: mysql
+        options: >-
+          --health-cmd "mysqladmin ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 3306:3306
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Test
+        env:
+          LIBSCHEMA_MYSQL_TEST_DSN: "root:mysql@tcp(127.0.0.1:3306)/libschematest?tls=false"
+        run: go test ./lsmysql/... -v
+
