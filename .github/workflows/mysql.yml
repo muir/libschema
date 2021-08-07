@@ -9,6 +9,7 @@ jobs:
       mysql:
         image: mysql:8
         env:
+          MYSQL_DATABASE: libschematest
           MYSQL_ROOT_PASSWORD: mysql
         options: >-
           --health-cmd "mysqladmin ping"
