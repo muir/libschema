@@ -1,4 +1,4 @@
-name: Run Go tests
+name: Go tests
 on: [ push ]
 jobs:
   Build-and-test:

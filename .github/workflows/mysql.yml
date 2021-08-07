@@ -32,6 +32,6 @@ jobs:
 
       - name: Test
         env:
-          LIBSCHEMA_MYSQL_TEST_DSN: "root:mysql@tcp(127.0.0.1:3306)/libschematest?tls=false
+          LIBSCHEMA_MYSQL_TEST_DSN: "root:mysql@tcp(127.0.0.1:3306)/libschematest?tls=false"
         run: go test ./lsmysql/... -v
 
