@@ -1,9 +1,9 @@
-
 # libschema - schema migration for libraries
 
 [![GoDoc](https://godoc.org/github.com/muir/libschema?status.png)](https://pkg.go.dev/github.com/muir/libschema)
 ![unit tests](https://github.com/muir/libschema/actions/workflows/go.yml/badge.svg)
 ![pg tests](https://github.com/muir/libschema/actions/workflows/pg.yml/badge.svg)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fmuir%2Flibschema.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fmuir%2Flibschema?ref=badge_shield)
 
 
 Install:
@@ -192,3 +192,7 @@ libschema.SkipThisAndRemainingIf(func() bool {
 This set of reverse migrations would always be small since it would just be enough to take you
 back to the current production release.
 
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fmuir%2Flibschema.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fmuir%2Flibschema?ref=badge_large)
