@@ -36,3 +36,12 @@ jobs:
           LIBSCHEMA_MYSQL_TEST_DSN: "root:mysql@tcp(127.0.0.1:3306)/libschematest?tls=false"
         run: go test ./lsmysql/... -v
 
+      - name: Run Coverage
+        env:
+          LIBSCHEMA_MYSQL_TEST_DSN: "root:mysql@tcp(127.0.0.1:3306)/libschematest?tls=false"
+        run: go test -coverprofile=coverage.txt -covermode=atomic ./lsmysql/... 
+
+      - name: Upload coverage to Codecov
+        run: bash <(curl -s https://codecov.io/bash)
+
+

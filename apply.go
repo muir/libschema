@@ -64,7 +64,7 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 		return errors.Errorf("--migrate-dsn can only be used when there is only one database to migrate")
 	}
 	for _, d := range todo {
-		err := func(d *Database) error {
+		err := func(d *Database) (finalErr error) {
 			if *MigrateDSN != "" {
 				var err error
 				d.db, err = OpenAnyDB(*MigrateDSN)
@@ -76,7 +76,12 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 			if err != nil {
 				return err
 			}
-			defer d.unlock()
+			defer func() {
+				err := d.unlock()
+				if err != nil && finalErr == nil {
+					finalErr = err
+				}
+			}()
 			if *ExitIfMigrateNeeded && !d.done() {
 				return errors.Errorf("Migrations required for %s", d.name)
 			}
@@ -306,8 +311,9 @@ func (d *Database) asyncMigrate(ctx context.Context) {
 	}
 }
 
-func (d *Database) unlock() {
+func (d *Database) unlock() error {
 	if !d.asyncInProgress {
-		d.driver.UnlockMigrationsTable(d.log)
+		return d.driver.UnlockMigrationsTable(d.log)
 	}
+	return nil
 }

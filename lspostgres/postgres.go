@@ -111,11 +111,10 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d
 	}
 	defer func() {
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 		} else {
 			err = errors.Wrapf(tx.Commit(), "Commit migration %s", m.Base().Name)
 		}
-		return
 	}()
 	pm := m.(*pmigration)
 	if pm.script != nil {
@@ -127,7 +126,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d
 	}
 	if err != nil {
 		err = errors.Wrapf(err, "Problem with migration %s", m.Base().Name)
-		tx.Rollback()
+		_ = tx.Rollback()
 		ntx, txerr := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
 		if txerr != nil {
 			return errors.Wrapf(err, "Tx for saving status for %s also failed with %s", m.Base().Name, txerr)

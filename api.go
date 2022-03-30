@@ -130,7 +130,6 @@ type Schema struct {
 	databases     map[string]*Database
 	databaseOrder []*Database
 	options       Options
-	count         int
 	context       context.Context
 }
 

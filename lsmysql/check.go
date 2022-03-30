@@ -11,8 +11,8 @@ type CheckResult string
 
 const (
 	Safe             CheckResult = "safe"
-	DataAndDDL                   = "dataAndDDL"
-	NonIdempotentDDL             = "nonIdempotentDDL"
+	DataAndDDL       CheckResult = "dataAndDDL"
+	NonIdempotentDDL CheckResult = "nonIdempotentDDL"
 )
 
 var ifExistsRE = regexp.MustCompile(`(?i)\bIF (?:NOT )?EXISTS\b`)
