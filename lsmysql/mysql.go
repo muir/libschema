@@ -1,44 +1,56 @@
-package lspostgres
+package lsmysql
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 
-	"github.com/lib/pq"
 	"github.com/muir/libschema"
 	"github.com/pkg/errors"
 )
 
-// Postgres is a libschema.Driver for connecting to Postgres-like databases that
+// MySQL is a libschema.Driver for connecting to MySQL-like databases that
 // have the following characteristics:
-// * Can do DDL commands inside transactions
-// * Support UPSERT using INSERT ... ON CONFLICT
-type Postgres struct {
-	lockTx *sql.Tx
+// * CANNOT do DDL commands inside transactions
+// * Support UPSERT using INSERT ... ON DUPLICATE KEY UPDATE
+// * uses /* -- and # for comments
+//
+// Because mysql DDL commands cause transactions to autocommit, tracking the schema changes in
+// a secondary table (like libschema does) is inherently unsafe.  The MySQL driver will
+// record that it is about to attempt a migration and it will record if that attempts succeeds
+// or fails, but if the program terminates mid-transaction, it is beyond the scope of libschema
+// to determine if the transaction succeeded or failed.  Such transactions will be retried.
+// For this reason, it is reccomend that DDL commands be written such that they are idempotent.
+type MySQL struct {
+	lockTx  *sql.Tx
+	lockStr string
+	db      *sql.DB
 }
 
-// New creates a libschema.Database with a postgres driver built in.
-func New(log libschema.MyLogger, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, error) {
-	return schema.NewDatabase(log, name, db, &Postgres{})
+// New creates a libschema.Database with a mysql driver built in.
+func New(log libschema.MyLogger, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, *MySQL, error) {
+	m := &MySQL{db: db}
+	d, err := schema.NewDatabase(log, name, db, m)
+	return d, m, err
 }
 
-type pmigration struct {
+type mmigration struct {
 	libschema.MigrationBase
 	script   func(context.Context, libschema.MyLogger, *sql.Tx) string
 	computed func(context.Context, libschema.MyLogger, *sql.Tx) error
 }
 
-func (m *pmigration) Copy() libschema.Migration {
-	return &pmigration{
+func (m *mmigration) Copy() libschema.Migration {
+	return &mmigration{
 		MigrationBase: m.MigrationBase.Copy(),
 		script:        m.script,
 		computed:      m.computed,
 	}
 }
 
-func (m *pmigration) Base() *libschema.MigrationBase {
+func (m *mmigration) Base() *libschema.MigrationBase {
 	return &m.MigrationBase
 }
 
@@ -49,13 +61,12 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 	}, opts...)
 }
 
-// Generate creates a libschema.Migration from a function that returns
-// SQL string
+// Generate creates a libschema.Migration from a function that returns a SQL string
 func Generate(
 	name string,
 	generator func(context.Context, libschema.MyLogger, *sql.Tx) string,
 	opts ...libschema.MigrationOption) libschema.Migration {
-	return pmigration{
+	return mmigration{
 		MigrationBase: libschema.MigrationBase{
 			Name: libschema.MigrationName{
 				Name: name,
@@ -71,7 +82,7 @@ func Computed(
 	name string,
 	action func(context.Context, libschema.MyLogger, *sql.Tx) error,
 	opts ...libschema.MigrationOption) libschema.Migration {
-	return pmigration{
+	return mmigration{
 		MigrationBase: libschema.MigrationBase{
 			Name: libschema.MigrationName{
 				Name: name,
@@ -81,7 +92,7 @@ func Computed(
 	}.applyOpts(opts)
 }
 
-func (m pmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migration {
+func (m mmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migration {
 	lsm := libschema.Migration(&m)
 	for _, opt := range opts {
 		opt(lsm)
@@ -91,7 +102,8 @@ func (m pmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migrat
 
 // DoOneMigration applies a single migration.
 // It is expected to be called by libschema.
-func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *libschema.Database, m libschema.Migration) (err error) {
+func (p *MySQL) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *libschema.Database, m libschema.Migration) (err error) {
+	// TODO: DRY
 	defer func() {
 		if err == nil {
 			m.Base().SetStatus(libschema.MigrationStatus{
@@ -104,7 +116,10 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d
 		return errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
 	}
 	if d.Options.SchemaOverride != "" {
-		_, err := tx.Exec(`SET search_path TO ` + pq.QuoteIdentifier(d.Options.SchemaOverride))
+		if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
+			return errors.Errorf("Options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
+		}
+		_, err := tx.Exec(`USE ` + d.Options.SchemaOverride)
 		if err != nil {
 			return errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 		}
@@ -117,10 +132,21 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d
 		}
 		return
 	}()
-	pm := m.(*pmigration)
+	pm := m.(*mmigration)
 	if pm.script != nil {
 		script := pm.script(ctx, log, tx)
-		_, err = tx.Exec(script)
+		switch CheckScript(script) {
+		case Safe:
+		case DataAndDDL:
+			err = errors.New("Migration combines DDL (Data Definition Language [schema changes]) and data manipulation")
+		case NonIdempotentDDL:
+			if !m.Base().HasSkipIf() {
+				err = errors.New("Unconditional migration has non-idempotent DDL (Data Definition Language [schema changes])")
+			}
+		}
+		if err == nil {
+			_, err = tx.Exec(script)
+		}
 		err = errors.Wrap(err, script)
 	} else {
 		err = pm.computed(ctx, log, tx)
@@ -147,7 +173,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
 // It is expected to be called by libschema.
-func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) error {
+func (p *MySQL) CreateSchemaTableIfNotExists(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) error {
 	schema, tableName, err := trackingSchemaTable(d)
 	if err != nil {
 		return err
@@ -162,30 +188,45 @@ func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ libschema
 	}
 	_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
-			metadata	varchar(255) NOT NULL DEFAULT '',
 			library		varchar(255) NOT NULL,
 			migration	varchar(255) NOT NULL,
 			done		boolean NOT NULL,
 			error		text NOT NULL,
-			updated_at	timestamp with time zone DEFAULT now(),
-			PRIMARY KEY	(metadata, library, migration)
-		)`, tableName))
+			updated_at	timestamp DEFAULT now(),
+			PRIMARY KEY	(library, migration)
+		) ENGINE = InnoDB`, tableName))
 	if err != nil {
 		return errors.Wrapf(err, "Could not create libschema migrations table '%s'", tableName)
 	}
 	return nil
 }
 
+var simpleIdentifierRE = regexp.MustCompile(`\A[A-Za-z][A-Za-z0-9_]*\z`)
+
+// When MySQL is in ANSI_QUOTES mode, it allows "table_name" quotes but when
+// it is not then it does not.  There is no prefect option: in ANSI_QUOTES
+// mode, you could have a table called `table` (eg: `CREATE TABLE "table"`) but
+// if you're not in ANSI_QUOTES mode then you cannot.  We're going to assume
+// that we're not in ANSI_QUOTES mode because we cannot assume that we are.
 func trackingSchemaTable(d *libschema.Database) (string, string, error) {
 	tableName := d.Options.TrackingTable
 	s := strings.Split(tableName, ".")
 	switch len(s) {
 	case 2:
-		schema := pq.QuoteIdentifier(s[0])
-		table := pq.QuoteIdentifier(s[1])
+		schema := s[0]
+		if !simpleIdentifierRE.MatchString(schema) {
+			return "", "", errors.Errorf("Tracking table schema name must be a simple identifier, not '%s'", schema)
+		}
+		table := s[1]
+		if !simpleIdentifierRE.MatchString(table) {
+			return "", "", errors.Errorf("Tracking table table name must be a simple identifier, not '%s'", table)
+		}
 		return schema, schema + "." + table, nil
 	case 1:
-		return "", pq.QuoteIdentifier(tableName), nil
+		if !simpleIdentifierRE.MatchString(tableName) {
+			return "", "", errors.Errorf("Tracking table table name must be a simple identifier, not '%s'", tableName)
+		}
+		return "", tableName, nil
 	default:
 		return "", "", errors.Errorf("Tracking table '%s' is not valid", tableName)
 	}
@@ -193,12 +234,13 @@ func trackingSchemaTable(d *libschema.Database) (string, string, error) {
 
 // trackingTable returns the schema+table reference for the migration tracking table.
 // The name is already quoted properly for use as a save postgres identifier.
+// TODO: DRY
 func trackingTable(d *libschema.Database) string {
 	_, table, _ := trackingSchemaTable(d)
 	return table
 }
 
-func (p *Postgres) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.Database, m libschema.Migration, done bool, migrationError error) error {
+func (p *MySQL) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.Database, m libschema.Migration, done bool, migrationError error) error {
 	var estr string
 	if migrationError != nil {
 		estr = migrationError.Error()
@@ -209,13 +251,8 @@ func (p *Postgres) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.D
 		"error":     migrationError,
 	})
 	q := fmt.Sprintf(`
-		INSERT INTO %s (library, migration, done, error, updated_at)
-		VALUES ($1, $2, $3, $4, now())
-		ON CONFLICT (metadata, library, migration) DO UPDATE
-		SET	done = EXCLUDED.done,
-			error = EXCLUDED.error,
-			updated_at = EXCLUDED.updated_at
-			`, trackingTable(d))
+		REPLACE INTO %s (library, migration, done, error, updated_at)
+		VALUES (?, ?, ?, ?, now())`, trackingTable(d))
 	_, err := tx.Exec(q, m.Base().Name.Library, m.Base().Name.Name, done, estr)
 	if err != nil {
 		return errors.Wrapf(err, "Save status for %s", m.Base().Name)
@@ -226,30 +263,27 @@ func (p *Postgres) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.D
 // LockMigrationsTable locks the migration tracking table for exclusive use by the
 // migrations running now.
 // It is expected to be called by libschema.
-func (p *Postgres) LockMigrationsTable(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) error {
-	tableName := trackingTable(d)
+// In MySQL, locks are _not_ tied to transactions so closing the transaction
+// does not release the lock.  We'll use a transaction just to make sure that
+// we're using the same connection.  If LockMigrationsTable succeeds, be sure to
+// call UnlockMigrationsTable.
+func (p *MySQL) LockMigrationsTable(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) error {
+	_, tableName, err := trackingSchemaTable(d)
+	if err != nil {
+		return err
+	}
 	if p.lockTx != nil {
 		return errors.Errorf("libschema migrations table, '%s' already locked", tableName)
-	}
-	_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
-		INSERT INTO %s (metadata, library, migration, done, error)
-		VALUES ('lock', '', '', true, '')
-		ON CONFLICT DO NOTHING`, tableName))
-	if err != nil {
-		return errors.Wrapf(err, "Could not add lock row to %s", tableName)
 	}
 	tx, err := d.DB().BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return errors.Wrap(err, "Could not start transaction: %s")
 	}
-	var junk string
-	err = tx.QueryRow(fmt.Sprintf(`
-		SELECT	metadata
-		FROM	%s
-		WHERE	metadata = 'lock'
-		FOR UPDATE`, tableName)).Scan(&junk)
+	p.lockStr = "libschema_" + tableName
+	var gotLock int
+	err = tx.QueryRow(`SELECT GET_LOCK(?, -1)`, p.lockStr).Scan(&gotLock)
 	if err != nil {
-		return errors.Wrapf(err, "Could not lock libschema migrations table '%s'", tableName)
+		return errors.Wrapf(err, "Could not get lock for libschema migrations")
 	}
 	p.lockTx = tx
 	return nil
@@ -257,23 +291,29 @@ func (p *Postgres) LockMigrationsTable(ctx context.Context, _ libschema.MyLogger
 
 // UnlockMigrationsTable unlocks the migration tracking table.
 // It is expected to be called by libschema.
-func (p *Postgres) UnlockMigrationsTable(_ libschema.MyLogger) error {
+func (p *MySQL) UnlockMigrationsTable(_ libschema.MyLogger) error {
 	if p.lockTx == nil {
 		return errors.Errorf("libschema migrations table, not locked")
 	}
-	_ = p.lockTx.Rollback()
-	p.lockTx = nil
+	defer func() {
+		_ = p.lockTx.Rollback()
+		p.lockTx = nil
+	}()
+	_, err := p.lockTx.Exec(`SELECT RELEASE_LOCK(?)`, p.lockStr)
+	if err != nil {
+		return errors.Wrap(err, "Could not release explicit lock for schema migrations")
+	}
 	return nil
 }
 
 // LoadStatus loads the current status of all migrations from the migration tracking table.
 // It is expected to be called by libschema.
-func (p *Postgres) LoadStatus(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) ([]libschema.MigrationName, error) {
+func (p *MySQL) LoadStatus(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) ([]libschema.MigrationName, error) {
+	// TODO: DRY
 	tableName := trackingTable(d)
 	rows, err := d.DB().QueryContext(ctx, fmt.Sprintf(`
 		SELECT	library, migration, done
-		FROM	%s
-		WHERE	metadata = ''`, tableName))
+		FROM	%s`, tableName))
 	if err != nil {
 		return nil, errors.Wrap(err, "Cannot query migration status")
 	}
@@ -300,8 +340,8 @@ func (p *Postgres) LoadStatus(ctx context.Context, _ libschema.MyLogger, d *libs
 // IsMigrationSupported checks to see if a migration is well-formed.  Absent a code change, this
 // should always return nil.
 // It is expected to be called by libschema.
-func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ libschema.MyLogger, migration libschema.Migration) error {
-	m, ok := migration.(*pmigration)
+func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ libschema.MyLogger, migration libschema.Migration) error {
+	m, ok := migration.(*mmigration)
 	if !ok {
 		return fmt.Errorf("Non-postgres migration %s registered with postgres migrations", migration.Base().Name)
 	}

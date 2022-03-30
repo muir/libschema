@@ -42,11 +42,13 @@ type MigrationOption func(Migration)
 
 // Migration defines a single database defintion update.
 type MigrationBase struct {
-	Name     MigrationName
-	async    bool
-	rawAfter []MigrationName
-	order    int // overall desired ordring across all libraries, ignores runAfter
-	status   MigrationStatus
+	Name            MigrationName
+	async           bool
+	rawAfter        []MigrationName
+	order           int // overall desired ordring across all libraries, ignores runAfter
+	status          MigrationStatus
+	skipIf          func() (bool, error)
+	skipRemainingIf func() (bool, error)
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -66,9 +68,8 @@ type Migration interface {
 
 // MigrationStatus tracks if a migration is complete or not.
 type MigrationStatus struct {
-	Done    bool
-	Partial string // for Mysql, the string represents the portion of multiple commands that have completed
-	Error   string // If an attempt was made but failed, this will be set
+	Done  bool
+	Error string // If an attempt was made but failed, this will be set
 }
 
 // Database tracks all of the migrations for a specific database.
@@ -203,6 +204,18 @@ func After(lib, migration string) MigrationOption {
 	}
 }
 
+func SkipIf(pred func() (bool, error)) MigrationOption {
+	return func(m Migration) {
+		m.Base().skipIf = pred
+	}
+}
+
+func SkipRemainingIf(pred func() (bool, error)) MigrationOption {
+	return func(m Migration) {
+		m.Base().skipRemainingIf = pred
+	}
+}
+
 func (d *Database) DB() *sql.DB {
 	return d.db
 }
@@ -240,6 +253,10 @@ func (m *MigrationBase) Status() MigrationStatus {
 
 func (m *MigrationBase) SetStatus(status MigrationStatus) {
 	m.status = status
+}
+
+func (m *MigrationBase) HasSkipIf() bool {
+	return m.skipIf != nil
 }
 
 func (n MigrationName) String() string {

@@ -212,15 +212,16 @@ func (d *Database) migrate(ctx context.Context) (err error) {
 			go d.asyncMigrate(ctx)
 			return nil
 		}
-		err = d.doOneMigration(ctx, m)
-		if err != nil {
+		var stop bool
+		stop, err = d.doOneMigration(ctx, m)
+		if err != nil || stop {
 			return err
 		}
 	}
 	return nil
 }
 
-func (d *Database) doOneMigration(ctx context.Context, m Migration) error {
+func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error) {
 	if d.Options.DebugLogging {
 		d.log.Debug("Starting migration", map[string]interface{}{
 			"database": d.name,
@@ -228,11 +229,29 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) error {
 			"name":     m.Base().Name.Name,
 		})
 	}
+	if m.Base().skipIf != nil {
+		skip, err := m.Base().skipIf()
+		if err != nil {
+			return false, errors.Wrapf(err, "SkipIf %s", m.Base().Name)
+		}
+		if skip {
+			return false, nil
+		}
+	}
+	if m.Base().skipRemainingIf != nil {
+		skip, err := m.Base().skipRemainingIf()
+		if err != nil {
+			return false, errors.Wrapf(err, "SkipRemainingIf %s", m.Base().Name)
+		}
+		if skip {
+			return true, nil
+		}
+	}
 	err := d.driver.DoOneMigration(ctx, d.log, d, m)
 	if err != nil && d.Options.OnMigrationFailure != nil {
 		d.Options.OnMigrationFailure(m.Base().Name, err)
 	}
-	return err
+	return false, err
 }
 
 func (d *Database) lastUnfinishedSynchrnous() int {
@@ -279,8 +298,9 @@ func (d *Database) asyncMigrate(ctx context.Context) {
 		if m.Base().Status().Done {
 			continue
 		}
-		err = d.doOneMigration(ctx, m)
-		if err != nil {
+		var stop bool
+		stop, err = d.doOneMigration(ctx, m)
+		if err != nil || stop {
 			return
 		}
 	}
