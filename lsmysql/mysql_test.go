@@ -252,7 +252,3 @@ func TestSkipFunctions(t *testing.T) {
 		assert.True(t, enf, "users hi_level constraint")
 	}
 }
-
-func pointerToString(s string) *string {
-	return &s
-}
