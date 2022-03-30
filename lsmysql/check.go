@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/muir/libschema/sqltoken"
+	"github.com/muir/sqltoken"
 )
 
 type CheckResult string
