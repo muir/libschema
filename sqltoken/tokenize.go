@@ -69,6 +69,8 @@ type Config struct {
 
 type Tokens []Token
 
+type TokensList []Tokens
+
 func MySQLConfig() Config {
 	return Config{
 		NoticeQuestionMark:   true,
@@ -653,6 +655,9 @@ Done:
 }
 
 func (ts Tokens) String() string {
+	if len(ts) == 0 {
+		return ""
+	}
 	strs := make([]string, len(ts))
 	for i, t := range ts {
 		strs[i] = t.Text
@@ -694,4 +699,32 @@ func (ts Tokens) Strip() Tokens {
 	}
 	c = c[:lastReal]
 	return c
+}
+
+// CmdSplit breaks up the token array into multiple token arrays,
+// one per command (splitting on ";")
+func (ts Tokens) CmdSplit() TokensList {
+	var r TokensList
+	start := 0
+	for i, t := range ts {
+		if t.Type == Semicolon {
+			r = append(r, Tokens(ts[start:i]).Strip())
+			start = i + 1
+		}
+	}
+	if start < len(ts) {
+		r = append(r, Tokens(ts[start:]).Strip())
+	}
+	return r
+}
+
+func (tl TokensList) Strings() []string {
+	r := make([]string, 0, len(tl))
+	for _, ts := range tl {
+		s := ts.String()
+		if s != "" {
+			r = append(r, s)
+		}
+	}
+	return r
 }

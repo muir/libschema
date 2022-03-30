@@ -257,6 +257,10 @@ func (m *MigrationBase) SetStatus(status MigrationStatus) {
 	m.status = status
 }
 
+func (m *MigrationBase) HasSkipIf() bool {
+	return m.skipIf != nil
+}
+
 func (n MigrationName) String() string {
 	return n.Library + ": " + n.Name
 }
