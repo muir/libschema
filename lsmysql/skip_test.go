@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-sql-driver/mysql"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lstesting"
@@ -34,17 +34,6 @@ func TestSkipFunctions(t *testing.T) {
 
 	dbase, m, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
-
-	// It appears that the default database can sometimes be changed from within
-	// a transaction in mysql version 8.  That sucks.  We'll do this test early so
-	// it doesn't fail randomly.
-	dbName, err := m.DatabaseName()
-	if assert.NoError(t, err, "database name") {
-		config, err := mysql.ParseDSN(dsn)
-		if assert.NoError(t, err, "parse dsn") {
-			assert.Equal(t, config.DBName, dbName, "database name")
-		}
-	}
 
 	dbase.Migrations("T",
 		lsmysql.Script("setup1", `
@@ -76,11 +65,10 @@ func TestSkipFunctions(t *testing.T) {
 	err = s.Migrate(context.Background())
 	assert.NoError(t, err)
 
-	m.UseDatabase(options.SchemaOverride)
-
-	dbNameOverride, err := m.DatabaseName()
-	if assert.NoError(t, err, "override database name") {
-		assert.Equal(t, options.SchemaOverride, dbNameOverride, "override database name")
+	dbName, err := m.DatabaseName()
+	if assert.NoError(t, err, "database name") {
+		t.Log("database name is set because it is inherited from options")
+		assert.Equal(t, options.SchemaOverride, dbName, "database name")
 	}
 
 	hasPK, err := m.HasPrimaryKey("users")
@@ -128,9 +116,6 @@ func TestSkipFunctions(t *testing.T) {
 		assert.False(t, exists, "has users.foo_idx")
 	}
 
-	m.UseDatabase("")
-	dbNameRestored, err := m.DatabaseName()
-	assert.NoError(t, err, "original database name")
 	m.UseDatabase("override")
 	dbOverride, err := m.DatabaseName()
 	if assert.NoError(t, err, "database name override") {
