@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-sql-driver/mysql v1.6.0
-	github.com/lib/pq v1.10.4
+	github.com/lib/pq v1.10.5
 	github.com/muir/sqltoken v0.0.4
 	github.com/muir/testinglogur v0.0.1
 	github.com/pkg/errors v0.9.1
