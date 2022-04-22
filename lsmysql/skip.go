@@ -103,7 +103,10 @@ func (p *MySQL) GetTableConstraint(table, constraintName string) (string, bool, 
 }
 
 // DatabaseName returns the name of the current database (aka schema for MySQL).
-// A call to UseDatabase() overrides all future calls to DatabaseName()
+// A call to UseDatabase() overrides all future calls to DatabaseName().  If the
+// MySQL object was created from a libschema.Schema that had SchemaOverride set
+// then this will return whatever that value was.  It is reccomened that
+// UseDatabase() be called to make sure that the right database is returned.
 func (m *MySQL) DatabaseName() (string, error) {
 	if m.databaseName != "" {
 		return m.databaseName, nil
@@ -115,7 +118,8 @@ func (m *MySQL) DatabaseName() (string, error) {
 
 // UseDatabase() overrides the default database for DatabaseName(), ColumnDefault(), HasPrimaryKey(),
 // HasTableIndex(), DoesColumnExist(), and GetTableConstraint().
-// If name is empty then the override is removed.
+// If name is empty then the override is removed and the database will be queried from
+// the mysql server.  Due to connection pooling in Go, that's a bad idea.
 func (m *MySQL) UseDatabase(name string) {
 	m.databaseName = name
 }

@@ -139,6 +139,6 @@ func TestSkipFunctions(t *testing.T) {
 	m.UseDatabase("")
 	dbNameReRestored, err := m.DatabaseName()
 	if assert.NoError(t, err, "original database name #2") {
-		assert.Equal(t, dbNameRestored, dbNameReRestored, "un-override")
+		assert.NotEqual(t, "override", dbNameReRestored, "un-override")
 	}
 }

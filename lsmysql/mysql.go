@@ -23,6 +23,16 @@ import (
 // or fails, but if the program terminates mid-transaction, it is beyond the scope of libschema
 // to determine if the transaction succeeded or failed.  Such transactions will be retried.
 // For this reason, it is reccomend that DDL commands be written such that they are idempotent.
+//
+// There are methods the MySQL type that can be used to query the state of the database and
+// thus transform DDL commands that are not idempotent (like CREATE INDEX) into idempotent
+// commands by only running them if they need to be run.
+//
+// Because Go's database/sql uses connection pooling and the mysql "USE database" command leaks
+// out of transactions, it is strongly recommended that the libschema.Option value of
+// SchemaOverride be set when creating the libschema.Schema object.  That SchemaOverride will
+// be propagated into the MySQL object and be used as a default table for all of the
+// functions to interrogate data defintion status.
 type MySQL struct {
 	lockTx       *sql.Tx
 	lockStr      string
@@ -34,6 +44,7 @@ type MySQL struct {
 func New(log libschema.MyLogger, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, *MySQL, error) {
 	m := &MySQL{db: db}
 	d, err := schema.NewDatabase(log, name, db, m)
+	m.databaseName = d.Options.SchemaOverride
 	return d, m, err
 }
 
