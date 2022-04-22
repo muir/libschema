@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lstesting"
@@ -16,9 +16,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Since MySQL does not support schemas (it treats them like databases),
-// LIBSCHEMA_MYSQL_TEST_DSN has to give access to a user that can create
-// and destroy databases.
+/*
+
+Since MySQL does not support schemas (it treats them like databases),
+LIBSCHEMA_MYSQL_TEST_DSN has to give access to a user that can create
+and destroy databases.
+
+For example:
+
+export PASSWORD=mysql
+docker run -d -p 3306:3306 -e MYSQL_DATABASE=libschematest -e MYSQL_ROOT_PASSWORD=$PASSWORD --restart=always --name=libschema_mysql mysql:8
+export LIBSCHEMA_MYSQL_TEST_DSN="root:${PASSWORD}@tcp(127.0.0.1:3306)/libschematest?tls=false"
+mysql --protocol=tcp -P 3306 -u root --password=$PASSWOrd --database=libschematest
+
+*/
 
 func TestMysqlHappyPath(t *testing.T) {
 	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
@@ -188,10 +199,12 @@ func TestSkipFunctions(t *testing.T) {
 	options.DebugLogging = true
 	s := libschema.New(context.Background(), options)
 
+	t.Log("DSN=", dsn)
 	db, err := sql.Open("mysql", dsn)
 	require.NoError(t, err, "open database")
 	defer db.Close()
-	defer cleanup(db)
+	_ = cleanup
+	// defer cleanup(db)
 
 	dbase, m, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
@@ -219,6 +232,21 @@ func TestSkipFunctions(t *testing.T) {
 
 	err = s.Migrate(context.Background())
 	assert.NoError(t, err)
+
+	dbName, err := m.DatabaseName()
+	if assert.NoError(t, err, "database name") {
+		config, err := mysql.ParseDSN(dsn)
+		if assert.NoError(t, err, "parse dsn") {
+			assert.Equal(t, config.DBName, dbName, "database name")
+		}
+	}
+
+	m.UseDatabase(options.SchemaOverride)
+
+	dbNameOverride, err := m.DatabaseName()
+	if assert.NoError(t, err, "override database name") {
+		assert.Equal(t, options.SchemaOverride, dbNameOverride, "override database name")
+	}
 
 	hasPK, err := m.HasPrimaryKey("users")
 	if assert.NoError(t, err, "users has pk") {
@@ -250,5 +278,11 @@ func TestSkipFunctions(t *testing.T) {
 	if assert.NoError(t, err, "users hi_level constraint") {
 		assert.Equal(t, "CHECK", typ, "users hi_level constraint")
 		assert.True(t, enf, "users hi_level constraint")
+	}
+
+	m.UseDatabase("")
+	dbNameRestored, err := m.DatabaseName()
+	if assert.NoError(t, err, "original database name") {
+		assert.Equal(t, dbName, dbNameRestored, "restored database name")
 	}
 }

@@ -24,9 +24,10 @@ import (
 // to determine if the transaction succeeded or failed.  Such transactions will be retried.
 // For this reason, it is reccomend that DDL commands be written such that they are idempotent.
 type MySQL struct {
-	lockTx  *sql.Tx
-	lockStr string
-	db      *sql.DB
+	lockTx       *sql.Tx
+	lockStr      string
+	db           *sql.DB
+	databaseName string // used in skip.go only
 }
 
 // New creates a libschema.Database with a mysql driver built in.

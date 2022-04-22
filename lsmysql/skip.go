@@ -8,13 +8,14 @@ import (
 
 // ColumnDefault returns the default value for a column.  If there
 // is no default value, then nil is returned.
-func (m *MySQL) ColumnDefault(table, column string) (*string, error) {
-	database, err := m.DatabaseName()
+// The table is assumed to be in the current database unless m.UseDatabase() has been called.
+func (p *MySQL) ColumnDefault(table, column string) (*string, error) {
+	database, err := p.DatabaseName()
 	if err != nil {
 		return nil, err
 	}
 	var dflt *string
-	err = m.db.QueryRow(`
+	err = p.db.QueryRow(`
 		SELECT	column_default
 		FROM	information_schema.columns
 		WHERE	table_schema = ?
@@ -25,19 +26,33 @@ func (m *MySQL) ColumnDefault(table, column string) (*string, error) {
 }
 
 // HasPrimaryKey returns true if the table has a primary key
-func (m *MySQL) HasPrimaryKey(table string) (bool, error) {
-	return m.TableHasIndex(table, "PRIMARY")
-}
-
-// TableHasIndex returns true if there is an index matching the
-// name given.
-func (m *MySQL) TableHasIndex(table, indexName string) (bool, error) {
-	database, err := m.DatabaseName()
+// The table is assumed to be in the current database unless m.UseDatabase() has been called.
+func (p *MySQL) HasPrimaryKey(table string) (bool, error) {
+	database, err := p.DatabaseName()
 	if err != nil {
 		return false, err
 	}
 	var count int
-	err = m.db.QueryRow(`
+	err = p.db.QueryRow(`
+		SELECT	COUNT(*)
+		FROM	information_schema.columns
+		WHERE	table_schema = ?
+		AND	table_name = ?
+		AND	column_key = 'PRI'`,
+		database, table).Scan(&count)
+	return count != 0, errors.Wrapf(err, "has primary key %s.%s", database, table)
+}
+
+// TableHasIndex returns true if there is an index matching the
+// name given.
+// The table is assumed to be in the current database unless m.UseDatabase() has been called.
+func (p *MySQL) TableHasIndex(table, indexName string) (bool, error) {
+	database, err := p.DatabaseName()
+	if err != nil {
+		return false, err
+	}
+	var count int
+	err = p.db.QueryRow(`
 		SELECT	COUNT(*)
 		FROM	information_schema.statistics
 		WHERE	table_schema = ?
@@ -45,17 +60,17 @@ func (m *MySQL) TableHasIndex(table, indexName string) (bool, error) {
 		AND	index_name = ?`,
 		database, table, indexName).Scan(&count)
 	return count != 0, errors.Wrapf(err, "has table index %s.%s", table, indexName)
-
 }
 
 // DoesColumnExist returns true if the column exists
-func (m *MySQL) DoesColumnExist(table, column string) (bool, error) {
-	database, err := m.DatabaseName()
+// The table is assumed to be in the current database unless m.UseDatabase() has been called.
+func (p *MySQL) DoesColumnExist(table, column string) (bool, error) {
+	database, err := p.DatabaseName()
 	if err != nil {
 		return false, err
 	}
 	var count int
-	err = m.db.QueryRow(`
+	err = p.db.QueryRow(`
 		SELECT	COUNT(*)
 		FROM	information_schema.columns
 		WHERE	table_schema = ?
@@ -66,14 +81,15 @@ func (m *MySQL) DoesColumnExist(table, column string) (bool, error) {
 }
 
 // GetTableConstraints returns the type of constraint and if it is enforced.
-func (m *MySQL) GetTableConstraint(table, constraintName string) (string, bool, error) {
-	database, err := m.DatabaseName()
+// The table is assumed to be in the current database unless m.UseDatabase() has been called.
+func (p *MySQL) GetTableConstraint(table, constraintName string) (string, bool, error) {
+	database, err := p.DatabaseName()
 	if err != nil {
 		return "", false, err
 	}
 	var typ *string
 	var enforced *string
-	err = m.db.QueryRow(`
+	err = p.db.QueryRow(`
 		SELECT	constraint_type, enforced
 		FROM	information_schema.table_constraints
 		WHERE	constraint_schema = ?
@@ -86,11 +102,22 @@ func (m *MySQL) GetTableConstraint(table, constraintName string) (string, bool, 
 	return asString(typ), asString(enforced) == "YES", errors.Wrapf(err, "get table constraint %s.%s", table, constraintName)
 }
 
-// DatabaseName returns the name of the current database (aka schema for MySQL)
+// DatabaseName returns the name of the current database (aka schema for MySQL).
+// A call to UseDatabase() overrides all future calls to DatabaseName()
 func (m *MySQL) DatabaseName() (string, error) {
+	if m.databaseName != "" {
+		return m.databaseName, nil
+	}
 	var database string
 	err := m.db.QueryRow(`SELECT DATABASE()`).Scan(&database)
 	return database, errors.Wrap(err, "select database()")
+}
+
+// UseDatabase() overrides the default database for DatabaseName(), ColumnDefault(), HasPrimaryKey(),
+// HasTableIndex(), DoesColumnExist(), and GetTableConstraint().
+// If name is empty then the override is removed.
+func (m *MySQL) UseDatabase(name string) {
+	m.databaseName = name
 }
 
 func asString(s *string) string {

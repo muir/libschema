@@ -15,6 +15,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+/*
+
+PostgreSQL supports schemas so testing can be done with a user that is limited
+to a single database.
+
+export PGPASSWORD=postgres
+docker run --name postgres -p 5432:5432 -e POSTGRES_PASSWORD="$PGPASSWORD" --restart=always -d postgres:latest
+
+psql -h localhost -p 5432 --user postgres <<END
+CREATE DATABASE lstesting;
+CREATE USER lstestuser WITH NOCREATEDB PASSWORD 'lstestpass';
+GRANT ALL PRIVILEGES ON DATABASE lstesting TO lstestuser;
+END
+
+LIBSCHEMA_POSTGRES_TEST_DSN="postgresql://lstestuser:lstestpass@localhost:5432/lstesting?sslmode=disable"
+
+*/
+
 func TestPostgresMigrations(t *testing.T) {
 	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
 	if dsn == "" {
