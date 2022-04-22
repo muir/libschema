@@ -35,6 +35,17 @@ func TestSkipFunctions(t *testing.T) {
 	dbase, m, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
+	// It appears that the default database can sometimes be changed from within
+	// a transaction in mysql version 8.  That sucks.  We'll do this test early so
+	// it doesn't fail randomly.
+	dbName, err := m.DatabaseName()
+	if assert.NoError(t, err, "database name") {
+		config, err := mysql.ParseDSN(dsn)
+		if assert.NoError(t, err, "parse dsn") {
+			assert.Equal(t, config.DBName, dbName, "database name")
+		}
+	}
+
 	dbase.Migrations("T",
 		lsmysql.Script("setup1", `
 			CREATE TABLE IF NOT EXISTS users (
@@ -64,14 +75,6 @@ func TestSkipFunctions(t *testing.T) {
 
 	err = s.Migrate(context.Background())
 	assert.NoError(t, err)
-
-	dbName, err := m.DatabaseName()
-	if assert.NoError(t, err, "database name") {
-		config, err := mysql.ParseDSN(dsn)
-		if assert.NoError(t, err, "parse dsn") {
-			assert.Equal(t, config.DBName, dbName, "database name")
-		}
-	}
 
 	m.UseDatabase(options.SchemaOverride)
 
