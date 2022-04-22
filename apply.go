@@ -234,6 +234,9 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			"name":     m.Base().Name.Name,
 		})
 	}
+	if err := d.driver.IsMigrationSupported(d, d.log, m); err != nil {
+		return false, err
+	}
 	if m.Base().skipIf != nil {
 		skip, err := m.Base().skipIf()
 		if err != nil {

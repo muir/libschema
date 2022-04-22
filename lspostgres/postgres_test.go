@@ -15,6 +15,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+/*
+
+PostgreSQL supports schemas so testing can be done with a user that is limited
+to a single database.
+
+export PGPASSWORD=postgres
+docker run --name postgres -p 5432:5432 -e POSTGRES_PASSWORD="$PGPASSWORD" --restart=always -d postgres:latest
+
+psql -h localhost -p 5432 --user postgres <<END
+CREATE DATABASE lstesting;
+CREATE USER lstestuser WITH NOCREATEDB PASSWORD 'lstestpass';
+GRANT ALL PRIVILEGES ON DATABASE lstesting TO lstestuser;
+END
+
+LIBSCHEMA_POSTGRES_TEST_DSN="postgresql://lstestuser:lstestpass@localhost:5432/lstesting?sslmode=disable"
+
+*/
+
 func TestPostgresMigrations(t *testing.T) {
 	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
 	if dsn == "" {
@@ -40,55 +58,70 @@ func TestPostgresMigrations(t *testing.T) {
 		}
 	}
 	options.DebugLogging = true
-	s := libschema.New(context.Background(), options)
 
 	db, err := sql.Open("postgres", dsn)
 	require.NoError(t, err, "open database")
 	defer db.Close()
 	defer cleanup(db)
 
+	s := libschema.New(context.Background(), options)
 	dbase, err := lspostgres.New(testinglogur.Get(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
-	dbase.Migrations("L1",
-		lspostgres.Generate("T1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
-			actions = append(actions, "MIGRATE: L1.T1")
-			return `CREATE TABLE T1 (id text)`
-		}),
-		lspostgres.Computed("T2", func(_ context.Context, _ libschema.MyLogger, tx *sql.Tx) error {
-			actions = append(actions, "MIGRATE: L1.T2")
-			_, err := tx.Exec(`
+	defineMigrations := func(dbase *libschema.Database, extra bool) {
+		l1migrations := []libschema.Migration{
+			lspostgres.Generate("T1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: L1.T1")
+				return `CREATE TABLE T1 (id text)`
+			}),
+			lspostgres.Computed("T2", func(_ context.Context, _ libschema.MyLogger, tx *sql.Tx) error {
+				actions = append(actions, "MIGRATE: L1.T2")
+				_, err := tx.Exec(`
 				INSERT INTO T1 (id) VALUES ('T2');
 				INSERT INTO T3 (id) VALUES ('T2');
 				CREATE TABLE T2 (id text)`)
-			return err
-		}, libschema.After("L2", "T3")),
-		lspostgres.Generate("PT1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
-			actions = append(actions, "MIGRATE: L1.PT1")
-			return `
+				return err
+			}, libschema.After("L2", "T3")),
+			lspostgres.Generate("PT1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: L1.PT1")
+				return `
 				INSERT INTO T1 (id) VALUES ('PT1');
 				INSERT INTO T2 (id) VALUES ('PT1');
 				INSERT INTO T3 (id) VALUES ('PT1');
 			`
-		}),
-	)
+			}),
+		}
+		if extra {
+			l1migrations = append(l1migrations,
+				lspostgres.Generate("G1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+					actions = append(actions, "MIGRATE: G1")
+					return `CREATE TABLE G1 (id text);`
+				}),
+			)
+		}
 
-	dbase.Migrations("L2",
-		lspostgres.Generate("T3", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
-			actions = append(actions, "MIGRATE: L2.T3")
-			return `
+		dbase.Migrations("L1", l1migrations...)
+
+		dbase.Migrations("L2",
+			lspostgres.Generate("T3", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: L2.T3")
+				return `
 				INSERT INTO T1 (id) VALUES ('T3');
 				CREATE TABLE T3 (id text)`
-		}),
-		lspostgres.Generate("T4", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
-			actions = append(actions, "MIGRATE: L2.T4")
-			return `
+			}),
+			lspostgres.Generate("T4", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: L2.T4")
+				return `
 				INSERT INTO T1 (id) VALUES ('T4');
 				INSERT INTO T2 (id) VALUES ('T4');
 				INSERT INTO T3 (id) VALUES ('T4');
 				CREATE TABLE T4 (id text)`
-		}),
-	)
+			}),
+		)
+	}
+
+	t.Log("now we define the migrations")
+	defineMigrations(dbase, false)
 
 	err = s.Migrate(context.Background())
 	assert.NoError(t, err)
@@ -117,4 +150,23 @@ func TestPostgresMigrations(t *testing.T) {
 		names = append(names, name)
 	}
 	assert.Equal(t, []string{"t1", "t2", "t3", "t4", "tracking_table"}, names, "table names")
+
+	s = libschema.New(context.Background(), options)
+	dbase, err = lspostgres.New(testinglogur.Get(t), "test", s, db)
+	require.NoError(t, err, "libschema NewDatabase")
+
+	t.Log("Now we define slightly more migrations")
+	defineMigrations(dbase, true)
+
+	actions = nil
+	t.Log("now we do the migrations")
+	err = s.Migrate(context.Background())
+	assert.NoError(t, err)
+
+	t.Log("now we check that the sequence of actions matches our expectations")
+	assert.Equal(t, []string{
+		"START",
+		"MIGRATE: G1",
+		"COMPLETE",
+	}, actions)
 }
