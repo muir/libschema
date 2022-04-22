@@ -116,6 +116,13 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *l
 	if err != nil {
 		return errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
 	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		} else {
+			err = errors.Wrapf(tx.Commit(), "Commit migration %s", m.Base().Name)
+		}
+	}()
 	if d.Options.SchemaOverride != "" {
 		if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
 			return errors.Errorf("Options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
@@ -125,13 +132,6 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *l
 			return errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 		}
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		} else {
-			err = errors.Wrapf(tx.Commit(), "Commit migration %s", m.Base().Name)
-		}
-	}()
 	pm := m.(*mmigration)
 	if pm.script != nil {
 		script := pm.script(ctx, log, tx)
