@@ -48,4 +48,3 @@ jobs:
           flags: mysql_tests
           fail_ci_if_error: true
 
-
