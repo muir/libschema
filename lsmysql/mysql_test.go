@@ -7,7 +7,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lstesting"
@@ -37,11 +36,17 @@ func TestMysqlHappyPath(t *testing.T) {
 		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
 	}
 
+	t.Log("As we go, we will build a log of what has happened in array 'actions'")
 	var actions []string
 
 	options, cleanup := lstesting.FakeSchema(t, "")
 
+	t.Log("Doing migrations in database/schema", options.SchemaOverride)
+
+	t.Log("We will error on unknown migrations")
 	options.ErrorOnUnknownMigrations = true
+
+	t.Log("if we fail a migration we will simply add that to the 'actions' array")
 	options.OnMigrationFailure = func(name libschema.MigrationName, err error) {
 		actions = append(actions, fmt.Sprintf("FAIL %s: %s", name, err))
 	}
@@ -56,68 +61,88 @@ func TestMysqlHappyPath(t *testing.T) {
 		}
 	}
 	options.DebugLogging = true
-	s := libschema.New(context.Background(), options)
 
+	t.Log("No opening the database...")
 	db, err := sql.Open("mysql", dsn)
 	require.NoError(t, err, "open database")
 	defer db.Close()
 	defer cleanup(db)
 
+	s := libschema.New(context.Background(), options)
 	dbase, _, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
-	dbase.Migrations("L1",
-		lsmysql.Generate("T1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
-			actions = append(actions, "MIGRATE: L1.T1")
-			return `CREATE TABLE IF NOT EXISTS T1 (id text) ENGINE = InnoDB`
-		}),
-		lsmysql.Script("T2pre", `
-				INSERT INTO T1 (id) VALUES ('T2');`),
-		lsmysql.Script("T2pre2", `
-				INSERT INTO T3 (id) VALUES ('T2');`,
-			libschema.After("L2", "T3")),
-		lsmysql.Computed("T2", func(_ context.Context, _ libschema.MyLogger, tx *sql.Tx) error {
-			actions = append(actions, "MIGRATE: L1.T2")
-			_, err := tx.Exec(`
-				CREATE TABLE IF NOT EXISTS T2 (id text) ENGINE = InnoDB`)
-			return err
-		}),
-		lsmysql.Generate("PT1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
-			actions = append(actions, "MIGRATE: L1.PT1")
-			return `
-				INSERT INTO T1 (id) VALUES ('PT1');
-			`
-		}),
-		lsmysql.Script("PT1p1", `
-				INSERT INTO T2 (id) VALUES ('PT1');`),
-		lsmysql.Script("PT1p2", `
-				INSERT INTO T3 (id) VALUES ('PT1');`),
-	)
+	defineMigrations := func(dbase *libschema.Database, extra bool) {
+		l1migrations := []libschema.Migration{
+			lsmysql.Generate("T1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: L1.T1")
+				return `CREATE TABLE IF NOT EXISTS T1 (id text) ENGINE = InnoDB`
+			}),
+			lsmysql.Script("T2pre", `
+					INSERT INTO T1 (id) VALUES ('T2');`),
+			lsmysql.Script("T2pre2", `
+					INSERT INTO T3 (id) VALUES ('T2');`,
+				libschema.After("L2", "T3")),
+			lsmysql.Computed("T2", func(_ context.Context, _ libschema.MyLogger, tx *sql.Tx) error {
+				actions = append(actions, "MIGRATE: L1.T2")
+				_, err := tx.Exec(`
+					CREATE TABLE IF NOT EXISTS T2 (id text) ENGINE = InnoDB`)
+				return err
+			}),
+			lsmysql.Generate("PT1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: L1.PT1")
+				return `
+					INSERT INTO T1 (id) VALUES ('PT1');
+				`
+			}),
+			lsmysql.Script("PT1p1", `
+					INSERT INTO T2 (id) VALUES ('PT1');`),
+			lsmysql.Script("PT1p2", `
+					INSERT INTO T3 (id) VALUES ('PT1');`),
+		}
+		if extra {
+			l1migrations = append(l1migrations,
+				lsmysql.Generate("G1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+					actions = append(actions, "MIGRATE: G1")
+					return `
+						CREATE TABLE IF NOT EXISTS G1 (id text) ENGINE = InnoDB
+					`
+				}),
+			)
+		}
 
-	dbase.Migrations("L2",
-		lsmysql.Script("T3pre", `
-				INSERT INTO T1 (id) VALUES ('T3');`),
-		lsmysql.Generate("T3", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
-			actions = append(actions, "MIGRATE: L2.T3")
-			return `
-				CREATE TABLE IF NOT EXISTS T3 (id text) ENGINE = InnoDB`
-		}),
-		lsmysql.Script("T4pre1", `
-				INSERT INTO T1 (id) VALUES ('T4');`),
-		lsmysql.Script("T4pre2", `
-				INSERT INTO T2 (id) VALUES ('T4');`),
-		lsmysql.Script("T4pre3", `
-				INSERT INTO T3 (id) VALUES ('T4');`),
-		lsmysql.Generate("T4", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
-			actions = append(actions, "MIGRATE: L2.T4")
-			return `
-				CREATE TABLE IF NOT EXISTS T4 (id text) ENGINE = InnoDB`
-		}),
-	)
+		dbase.Migrations("L1", l1migrations...)
 
+		dbase.Migrations("L2",
+			lsmysql.Script("T3pre", `
+					INSERT INTO T1 (id) VALUES ('T3');`),
+			lsmysql.Generate("T3", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: L2.T3")
+				return `
+					CREATE TABLE IF NOT EXISTS T3 (id text) ENGINE = InnoDB`
+			}),
+			lsmysql.Script("T4pre1", `
+					INSERT INTO T1 (id) VALUES ('T4');`),
+			lsmysql.Script("T4pre2", `
+					INSERT INTO T2 (id) VALUES ('T4');`),
+			lsmysql.Script("T4pre3", `
+					INSERT INTO T3 (id) VALUES ('T4');`),
+			lsmysql.Generate("T4", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: L2.T4")
+				return `
+					CREATE TABLE IF NOT EXISTS T4 (id text) ENGINE = InnoDB`
+			}),
+		)
+	}
+
+	t.Log("now we define the migrations")
+	defineMigrations(dbase, false)
+
+	t.Log("now we do the migrations")
 	err = s.Migrate(context.Background())
 	assert.NoError(t, err)
 
+	t.Log("now we check that the sequence of actions matches our expectations")
 	assert.Equal(t, []string{
 		"START",
 		"MIGRATE: L1.T1",
@@ -128,6 +153,7 @@ func TestMysqlHappyPath(t *testing.T) {
 		"COMPLETE",
 	}, actions)
 
+	t.Log("Now we check that the set of tables in information_schema matches our expectations")
 	rows, err := db.Query(`
 		SELECT	table_name
 		FROM	information_schema.tables
@@ -142,6 +168,26 @@ func TestMysqlHappyPath(t *testing.T) {
 		names = append(names, name)
 	}
 	assert.Equal(t, []string{"T1", "T2", "T3", "T4", "tracking_table"}, names, "table names")
+
+	t.Log("now we will start a new set of migrations, starting by reading the migration state")
+	s = libschema.New(context.Background(), options)
+	dbase, _, err = lsmysql.New(testinglogur.Get(t), "test", s, db)
+	require.NoError(t, err, "libschema NewDatabase, 2nd time")
+
+	t.Log("Now we define slightly more migrations")
+	defineMigrations(dbase, true)
+
+	actions = nil
+	t.Log("now we do the migrations")
+	err = s.Migrate(context.Background())
+	assert.NoError(t, err)
+
+	t.Log("now we check that the sequence of actions matches our expectations")
+	assert.Equal(t, []string{
+		"START",
+		"MIGRATE: G1",
+		"COMPLETE",
+	}, actions)
 }
 
 func TestMysqlNotAllowed(t *testing.T) {
@@ -186,103 +232,5 @@ func TestMysqlNotAllowed(t *testing.T) {
 		if assert.Error(t, err, tc.name) {
 			assert.Contains(t, err.Error(), tc.errorText, tc.name)
 		}
-	}
-}
-
-func TestSkipFunctions(t *testing.T) {
-	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
-	if dsn == "" {
-		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
-	}
-
-	options, cleanup := lstesting.FakeSchema(t, "")
-	options.DebugLogging = true
-	s := libschema.New(context.Background(), options)
-
-	t.Log("DSN=", dsn)
-	db, err := sql.Open("mysql", dsn)
-	require.NoError(t, err, "open database")
-	defer db.Close()
-	_ = cleanup
-	// defer cleanup(db)
-
-	dbase, m, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
-	require.NoError(t, err, "libschema NewDatabase")
-
-	dbase.Migrations("T",
-		lsmysql.Script("setup1", `
-			CREATE TABLE IF NOT EXISTS users (
-				id	varchar(255),
-				level	integer DEFAULT 37,
-				PRIMARY KEY (id)
-			) ENGINE=InnoDB`),
-		lsmysql.Script("setup2", `
-			CREATE TABLE IF NOT EXISTS accounts (
-				id	varchar(255)
-			) ENGINE=InnoDB`),
-		lsmysql.Script("setup3", `
-			ALTER TABLE users
-				ADD CONSTRAINT hi_level 
-					CHECK (level > 10) ENFORCED`,
-			libschema.SkipIf(func() (bool, error) {
-				t, _, err := m.GetTableConstraint("users", "hi_level")
-				return t != "", err
-			})),
-	)
-
-	err = s.Migrate(context.Background())
-	assert.NoError(t, err)
-
-	dbName, err := m.DatabaseName()
-	if assert.NoError(t, err, "database name") {
-		config, err := mysql.ParseDSN(dsn)
-		if assert.NoError(t, err, "parse dsn") {
-			assert.Equal(t, config.DBName, dbName, "database name")
-		}
-	}
-
-	m.UseDatabase(options.SchemaOverride)
-
-	dbNameOverride, err := m.DatabaseName()
-	if assert.NoError(t, err, "override database name") {
-		assert.Equal(t, options.SchemaOverride, dbNameOverride, "override database name")
-	}
-
-	hasPK, err := m.HasPrimaryKey("users")
-	if assert.NoError(t, err, "users has pk") {
-		assert.True(t, hasPK, "users has pk")
-	}
-	hasPK, err = m.HasPrimaryKey("accounts")
-	if assert.NoError(t, err, "accounts has pk") {
-		assert.False(t, hasPK, "accounts has pk")
-	}
-	dflt, err := m.ColumnDefault("users", "id")
-	if assert.NoError(t, err, "user id default") {
-		assert.Nil(t, dflt, "user id default")
-	}
-	dflt, err = m.ColumnDefault("users", "level")
-	if assert.NoError(t, err, "user level default") {
-		if assert.NotNil(t, dflt, "user level default") {
-			assert.Equal(t, "37", *dflt, "user id default")
-		}
-	}
-	exists, err := m.DoesColumnExist("users", "foo")
-	if assert.NoError(t, err, "users has foo") {
-		assert.False(t, exists, "users has foo")
-	}
-	exists, err = m.DoesColumnExist("users", "level")
-	if assert.NoError(t, err, "users has level") {
-		assert.True(t, exists, "users has level")
-	}
-	typ, enf, err := m.GetTableConstraint("users", "hi_level")
-	if assert.NoError(t, err, "users hi_level constraint") {
-		assert.Equal(t, "CHECK", typ, "users hi_level constraint")
-		assert.True(t, enf, "users hi_level constraint")
-	}
-
-	m.UseDatabase("")
-	dbNameRestored, err := m.DatabaseName()
-	if assert.NoError(t, err, "original database name") {
-		assert.Equal(t, dbName, dbNameRestored, "restored database name")
 	}
 }
