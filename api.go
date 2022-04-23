@@ -95,6 +95,11 @@ type Database struct {
 // Options operate at the Database level but are specified at the Schema level
 // at least initially.
 type Options struct {
+	// Overrides change the behavior of libschema in big ways: causing it to
+	// call os.Exit() when finished or not migrating.  If overrides is not
+	// specified then DefaultOverrides is used.
+	Overrides *OverrideOptions
+
 	// TrackingTable is the name of the table used to track which migrations
 	// have been applied
 	TrackingTable string
@@ -133,8 +138,8 @@ type Schema struct {
 	context       context.Context
 }
 
+// MyLogger defines the logging API that libschema uses.
 // See https://github.com/logur/logur#readme
-// This interface definition will not
 type MyLogger interface {
 	Trace(msg string, fields ...map[string]interface{})
 	Debug(msg string, fields ...map[string]interface{})
@@ -148,6 +153,9 @@ func New(ctx context.Context, options Options) *Schema {
 	if options.TrackingTable == "" {
 		options.TrackingTable = DefaultTrackingTable
 	}
+	if options.Overrides == nil {
+		options.Overrides = &DefaultOverrides
+	}
 	return &Schema{
 		options:   options,
 		context:   ctx,
@@ -155,8 +163,8 @@ func New(ctx context.Context, options Options) *Schema {
 	}
 }
 
-// NewDatabase creates a Database object.  For Postgres, this is bundled into
-// lspostgres.New().
+// NewDatabase creates a Database object.  For Postgres and Mysql this is bundled into
+// lspostgres.New() and lsmysql.New().
 func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Driver) (*Database, error) {
 	if _, ok := s.databases[name]; ok {
 		return nil, errors.Errorf("Duplicate database '%s'", name)

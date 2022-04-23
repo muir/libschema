@@ -2,37 +2,12 @@ package libschema
 
 import (
 	"context"
-	"flag"
 	"log"
 	"os"
 
 	"github.com/muir/libschema/dgorder"
 	"github.com/pkg/errors"
 )
-
-// MigrateOnly command line flag causes the program to exit when migrations are complete.
-// Asynchronous migrations may be skipped.
-var MigrateOnly = flag.Bool("migrate-only", false, "Call os.Exit() after completing migrations")
-
-// MigrateDatabase command line flag specifies that only a specific database should
-// be migrated.  The name corresponds to the name provided with the schema.NewDatabase() call
-var MigrateDatabase = flag.String("migrate-database", "", "Migrate only the database named by NewDatabase")
-
-// MigrateDSN overrides the data source name for a single database.  It must be used in
-// conjunction with MigrateDatabase.
-var MigrateDSN = flag.String("migrate-dsn", "", "Override *sql.DB")
-
-// NoMigrate command line flag skips all migrations
-var NoMigrate = flag.Bool("no-migrate", false, "Skip all migrations (except async)")
-
-// ExitIfMigrateNeeded command line flag causes the program to exit instead of running
-// required migrations.  Asynchronous migrations do not count as required.
-var ExitIfMigrateNeeded = flag.Bool("exit-if-migrate-needed", false, "Return error if migrations are not current")
-
-// TreateAsyncAsRequired command line flag causes asynchronous migrations to be
-// treated like regular migrations from the point of view of --migrate-only, --no-migrate,
-// and --exit-if-migrate-needed.
-var EverythingSynchronous = flag.Bool("migrate-all-synchronously", false, "Run async migrations synchronously")
 
 // Migrate runs pending migrations that have been registered as long as
 // the command line flags support doing migrations.  We all remaining migrations
@@ -41,7 +16,7 @@ var EverythingSynchronous = flag.Bool("migrate-all-synchronously", false, "Run a
 // A lock is held while migrations are in progress so that there is no chance of
 // double migrations.
 func (s *Schema) Migrate(ctx context.Context) (err error) {
-	if *MigrateOnly {
+	if s.options.Overrides.MigrateOnly {
 		defer func() {
 			if err != nil {
 				log.Fatalf("Migrations failed: %s", err)
@@ -49,25 +24,25 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 			os.Exit(0)
 		}()
 	}
-	if *NoMigrate {
+	if s.options.Overrides.NoMigrate {
 		return nil
 	}
 	todo := s.databaseOrder
-	if *MigrateDatabase != "" {
-		if d, ok := s.databases[*MigrateDatabase]; ok {
+	if s.options.Overrides.MigrateDatabase != "" {
+		if d, ok := s.databases[s.options.Overrides.MigrateDatabase]; ok {
 			todo = []*Database{d}
 		} else {
-			return errors.Errorf("database '%s' (from command line) not found", *MigrateDatabase)
+			return errors.Errorf("database '%s' (from command line) not found", s.options.Overrides.MigrateDatabase)
 		}
 	}
-	if *MigrateDSN != "" && len(todo) > 1 {
+	if s.options.Overrides.MigrateDSN != "" && len(todo) > 1 {
 		return errors.Errorf("--migrate-dsn can only be used when there is only one database to migrate")
 	}
 	for _, d := range todo {
 		err := func(d *Database) (finalErr error) {
-			if *MigrateDSN != "" {
+			if s.options.Overrides.MigrateDSN != "" {
 				var err error
-				d.db, err = OpenAnyDB(*MigrateDSN)
+				d.db, err = OpenAnyDB(s.options.Overrides.MigrateDSN)
 				if err != nil {
 					return errors.Wrap(err, "Could not open database")
 				}
@@ -82,10 +57,10 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 					finalErr = err
 				}
 			}()
-			if *ExitIfMigrateNeeded && !d.done() {
+			if s.options.Overrides.ExitIfMigrateNeeded && !d.done(s) {
 				return errors.Errorf("Migrations required for %s", d.name)
 			}
-			return d.migrate(ctx)
+			return d.migrate(ctx, s)
 		}(d)
 		if err != nil {
 			return err
@@ -149,13 +124,13 @@ func (d *Database) prepare(ctx context.Context) error {
 	return nil
 }
 
-func (d *Database) done() bool {
+func (d *Database) done(s *Schema) bool {
 	lastUnfishedSyncronous := d.lastUnfinishedSynchrnous()
 	for i, m := range d.sequence {
 		if m.Base().Status().Done {
 			continue
 		}
-		if m.Base().async && i > lastUnfishedSyncronous && !*EverythingSynchronous {
+		if m.Base().async && i > lastUnfishedSyncronous && !s.options.Overrides.EverythingSynchronous {
 			break
 		}
 		return false
@@ -166,7 +141,7 @@ func (d *Database) done() bool {
 	return true
 }
 
-func (d *Database) migrate(ctx context.Context) (err error) {
+func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 	if d.Options.ErrorOnUnknownMigrations && len(d.unknownMigrations) > 0 {
 		return errors.Errorf("%d unknown migrations, including %s", len(d.unknownMigrations), d.unknownMigrations[0])
 	}
@@ -177,7 +152,7 @@ func (d *Database) migrate(ctx context.Context) (err error) {
 		}
 	}()
 
-	if d.done() {
+	if d.done(s) {
 		d.log.Info("No migrations needed", map[string]interface{}{
 			"database": d.name,
 		})
@@ -206,7 +181,7 @@ func (d *Database) migrate(ctx context.Context) (err error) {
 
 			continue
 		}
-		if m.Base().async && i > lastUnfishedSyncronous && !*EverythingSynchronous {
+		if m.Base().async && i > lastUnfishedSyncronous && !s.options.Overrides.EverythingSynchronous {
 			// This and all following migrations are async
 			d.log.Info("The remaining migrations are async starting from", map[string]interface{}{
 				"database": d.name,
