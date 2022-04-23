@@ -1,7 +1,6 @@
 package dgorder
 
 import (
-	"fmt"
 	"strconv"
 	"testing"
 
@@ -33,11 +32,25 @@ func TestDependenciesOkay(t *testing.T) {
 			},
 			want: []int{1, 0, 3, 4, 2, 5},
 		},
+		{
+			nodes: []Node{
+				{},
+				{
+					Blocking: []int{2},
+				},
+				{
+					Blocking: []int{1},
+				},
+				{},
+			},
+			want: nil,
+			err:  "Circular dependency found that includes 1 depending upon 2",
+		},
 	}
 	for _, tc := range cases {
 		got, err := Order(tc.nodes, strconv.Itoa)
 		if tc.err != "" {
-			assert.Equal(t, fmt.Errorf(tc.err), err)
+			assert.Equal(t, tc.err, err.Error())
 		} else {
 			assert.NoError(t, err)
 			assert.Equal(t, tc.want, got)
