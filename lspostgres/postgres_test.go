@@ -92,6 +92,7 @@ func TestPostgresMigrations(t *testing.T) {
 			`
 			}),
 		}
+
 		if extra {
 			l1migrations = append(l1migrations,
 				lspostgres.Generate("G1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
@@ -117,6 +118,16 @@ func TestPostgresMigrations(t *testing.T) {
 				INSERT INTO T2 (id) VALUES ('T4');
 				INSERT INTO T3 (id) VALUES ('T4');
 				CREATE TABLE T4 (id text)`
+			}),
+			lspostgres.Generate("G2", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: G2")
+				return `CREATE TABLE G2 (id text);`
+			}, libschema.SkipRemainingIf(func() (bool, error) {
+				return !extra, nil
+			})),
+			lspostgres.Generate("G3", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				actions = append(actions, "MIGRATE: G3")
+				return `CREATE TABLE G3 (id text);`
 			}),
 		)
 	}
@@ -168,6 +179,8 @@ func TestPostgresMigrations(t *testing.T) {
 	assert.Equal(t, []string{
 		"START",
 		"MIGRATE: G1",
+		"MIGRATE: G2",
+		"MIGRATE: G3",
 		"COMPLETE",
 	}, actions)
 }
