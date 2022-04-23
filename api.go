@@ -177,10 +177,10 @@ func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Drive
 	return database, nil
 }
 
-// Asyncrhronous marks a migration is okay to run asynchronously.  If all of the
+// Asynchronous marks a migration is okay to run asynchronously.  If all of the
 // remaining migrations can be asynchronous, then schema.Migrate() will return
 // while the remaining migrations run.
-func Asyncrhronous() MigrationOption {
+func Asynchronous() MigrationOption {
 	return func(m Migration) {
 		m.Base().async = true
 	}
@@ -203,12 +203,24 @@ func After(lib, migration string) MigrationOption {
 	}
 }
 
+// SkipIf is checked before the migration is run.  If the function returns true
+// then this migration is skipped.  For MySQL, this allows migrations
+// that are not idempotent to be checked before they're run and skipped
+// if they have already been applied.
 func SkipIf(pred func() (bool, error)) MigrationOption {
 	return func(m Migration) {
 		m.Base().skipIf = pred
 	}
 }
 
+// SkipRemainingIf is checked before the migration is run.  If the function
+// returns true then this migration and all following it are not run at this
+// time.  One use for this to hold back migrations that have not been released
+// yet.  For example, in a blue-green deploy organization, you could first
+// do a migration that creates another column, then later do a migration that
+// removes the old column.  The migration to remove the old column can be defined
+// and tested in advance but held back by SkipRemainingIf until it's time to
+// deploy it.
 func SkipRemainingIf(pred func() (bool, error)) MigrationOption {
 	return func(m Migration) {
 		m.Base().skipRemainingIf = pred

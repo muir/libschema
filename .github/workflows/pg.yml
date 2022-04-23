@@ -38,7 +38,7 @@ jobs:
       - name: Run Coverage
         env:
           LIBSCHEMA_POSTGRES_TEST_DSN: "postgres://postgres:postgres@localhost?sslmode=disable"
-        run: go test -coverprofile=coverage.txt -covermode=atomic ./lspostgres/... 
+        run: go test -coverprofile=coverage.txt -covermode=atomic -coverpkg=github.com/muir/libschema/... ./lspostgres/... 
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v2

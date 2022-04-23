@@ -6,14 +6,23 @@ import (
 	"strings"
 )
 
+// maps from DSN to driver name
+var driverAliases = map[string]string{
+	"postgresql": "postgres",
+}
+
 func OpenAnyDB(dsn string) (*sql.DB, error) {
-	for _, driver := range sql.Drivers() {
-		if strings.HasPrefix(dsn, driver+"://") {
-			return sql.Open(driver, dsn)
-		}
-	}
 	if i := strings.Index(dsn, "://"); i != -1 {
-		return nil, fmt.Errorf("Could not find database driver matching %s", dsn[:i])
+		wanted := dsn[0:i]
+		if alias, ok := driverAliases[wanted]; ok {
+			wanted = alias
+		}
+		for _, driver := range sql.Drivers() {
+			if driver == wanted {
+				return sql.Open(driver, dsn)
+			}
+		}
+		return nil, fmt.Errorf("Could not find database driver matching %s", wanted)
 	}
 	return nil, fmt.Errorf("Could not find appropriate database driver for DSN")
 }
