@@ -177,10 +177,10 @@ func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Drive
 	return database, nil
 }
 
-// Asyncrhronous marks a migration is okay to run asynchronously.  If all of the
+// Asynchronous marks a migration is okay to run asynchronously.  If all of the
 // remaining migrations can be asynchronous, then schema.Migrate() will return
 // while the remaining migrations run.
-func Asyncrhronous() MigrationOption {
+func Asynchronous() MigrationOption {
 	return func(m Migration) {
 		m.Base().async = true
 	}
