@@ -277,6 +277,7 @@ func (d *Database) lastUnfinishedSynchrnous() int {
 	return -1
 }
 
+// allDone reports status
 func (d *Database) allDone(m Migration, err error) {
 	if err != nil && m != nil {
 		err = errors.Wrapf(err, "Migration %s", m.Base().Name)
@@ -299,8 +300,15 @@ func (d *Database) allDone(m Migration, err error) {
 func (d *Database) asyncMigrate(ctx context.Context) {
 	var err error
 	var m Migration
+	d.log.Info("Starting async migrations")
 	defer func() {
+		d.asyncInProgress = false
+		e := d.unlock()
+		if err == nil {
+			err = e
+		}
 		d.allDone(m, err)
+		d.log.Info("Done with async migrations")
 	}()
 	for _, m = range d.sequence {
 		if m.Base().Status().Done {
