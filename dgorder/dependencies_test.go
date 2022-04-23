@@ -46,6 +46,15 @@ func TestDependenciesOkay(t *testing.T) {
 			want: nil,
 			err:  "Circular dependency found that includes 1 depending upon 2",
 		},
+		{
+			nodes: []Node{
+				{
+					Blocking: []int{22},
+				},
+			},
+			want: nil,
+			err:  "Invalid dependency from 0 to 22",
+		},
 	}
 	for _, tc := range cases {
 		got, err := Order(tc.nodes, strconv.Itoa)
