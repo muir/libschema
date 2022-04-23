@@ -215,7 +215,7 @@ func testBadMigration(t *testing.T, expected string, define func(*libschema.Data
 	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
 	options.DebugLogging = true
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := libschema.OpenAnyDB(dsn)
 	require.NoError(t, err, "open database")
 	defer db.Close()
 	defer cleanup(db)
