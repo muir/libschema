@@ -93,37 +93,52 @@ func (m pmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migrat
 // It is expected to be called by libschema.
 func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *libschema.Database, m libschema.Migration) (err error) {
 	defer func() {
+		log.Debug("XXX in defer")
 		if err == nil {
 			m.Base().SetStatus(libschema.MigrationStatus{
 				Done: true,
 			})
 		}
+		log.Debug("XXX done defer")
 	}()
+	log.Debug("XXX do one 1")
 	tx, err := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
 	if err != nil {
 		return errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
 	}
+	log.Debug("XXX do one 2")
 	if d.Options.SchemaOverride != "" {
 		_, err := tx.Exec(`SET search_path TO ` + pq.QuoteIdentifier(d.Options.SchemaOverride))
 		if err != nil {
 			return errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 		}
 	}
+	log.Debug("XXX do one 3")
 	defer func() {
+		log.Debug("XXX do one 3a")
 		if err != nil {
 			_ = tx.Rollback()
 		} else {
 			err = errors.Wrapf(tx.Commit(), "Commit migration %s", m.Base().Name)
 		}
+		log.Debug("XXX do one 3b")
 	}()
 	pm := m.(*pmigration)
+	log.Debug("XXX do one 4")
 	if pm.script != nil {
+		log.Debug("XXX do one 4a1")
 		script := pm.script(ctx, log, tx)
+		log.Debug("XXX do one 4a2", map[string]interface{}{
+			"script": script,
+		})
 		_, err = tx.Exec(script)
+		log.Debug("XXX do one 4a3")
 		err = errors.Wrap(err, script)
 	} else {
+		log.Debug("XXX do one 4b")
 		err = pm.computed(ctx, log, tx)
 	}
+	log.Debug("XXX do one 5")
 	if err != nil {
 		err = errors.Wrapf(err, "Problem with migration %s", m.Base().Name)
 		_ = tx.Rollback()
@@ -133,6 +148,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d
 		}
 		tx = ntx
 	}
+	log.Debug("XXX do one 6")
 	txerr := p.saveStatus(log, tx, d, m, err == nil, err)
 	if txerr != nil {
 		if err == nil {
@@ -141,6 +157,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d
 			err = errors.Wrapf(err, "Save status for %s also failed: %s", m.Base().Name, txerr)
 		}
 	}
+	log.Debug("XXX do one 7")
 	return
 }
 

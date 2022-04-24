@@ -38,6 +38,14 @@ func TestBadMigrations(t *testing.T) {
 				)
 			},
 		},
+		{
+			name:  "duplicate library",
+			error: `duplicate library 'L2'`,
+			define: func(dbase *libschema.Database) {
+				dbase.Migrations("L2", lspostgres.Script("T4", `CREATE TABLE T1 (id text)`))
+				dbase.Migrations("L2", lspostgres.Script("T5", `CREATE TABLE T2 (id text)`))
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -70,7 +78,7 @@ func testBadMigration(t *testing.T, expected string, define func(*libschema.Data
 	define(dbase)
 
 	err = s.Migrate(context.Background())
-	assert.Error(t, err, "should error")
-
-	assert.Contains(t, err.Error(), expected)
+	if assert.Error(t, err, "should error") {
+		assert.Contains(t, err.Error(), expected)
+	}
 }

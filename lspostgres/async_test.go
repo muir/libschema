@@ -27,7 +27,7 @@ func TestAsyncMigrations(t *testing.T) {
 
 	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
 	options.ErrorOnUnknownMigrations = true
-	options.OnMigrationsComplete = func(err error) {
+	options.OnMigrationsComplete = func(_ *libschema.Database, err error) {
 		assert.NoError(t, err, "completion error")
 		time.Sleep(10 * time.Millisecond)
 		close(migrationComplete)

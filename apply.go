@@ -5,6 +5,9 @@ import (
 	"log"
 	"os"
 
+	"github.com/muir/libschema/internal"
+
+	"github.com/hashicorp/go-multierror"
 	"github.com/muir/libschema/dgorder"
 	"github.com/pkg/errors"
 )
@@ -20,6 +23,9 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 		defer func() {
 			if err != nil {
 				log.Fatalf("Migrations failed: %s", err)
+			}
+			if internal.TestingMode {
+				panic("test exit: migrate only")
 			}
 			os.Exit(0)
 		}()
@@ -39,6 +45,9 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 		return errors.Errorf("--migrate-dsn can only be used when there is only one database to migrate")
 	}
 	for _, d := range todo {
+		if len(d.errors) != 0 {
+			return multierror.Append(d.errors[0], d.errors[1:]...)
+		}
 		err := func(d *Database) (finalErr error) {
 			if s.options.Overrides.MigrateDSN != "" {
 				var err error
@@ -58,7 +67,7 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 				}
 			}()
 			if s.options.Overrides.ExitIfMigrateNeeded && !d.done(s) {
-				return errors.Errorf("Migrations required for %s", d.name)
+				return errors.Errorf("Migrations required for %s", d.Name)
 			}
 			return d.migrate(ctx, s)
 		}(d)
@@ -99,7 +108,7 @@ func (d *Database) prepare(ctx context.Context) error {
 		d.sequence[i] = m
 		if d.Options.DebugLogging {
 			d.log.Debug("Migration sequence", map[string]interface{}{
-				"database": d.name,
+				"database": d.Name,
 				"library":  m.Base().Name.Library,
 				"name":     m.Base().Name.Name,
 			})
@@ -154,17 +163,17 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 
 	if d.done(s) {
 		d.log.Info("No migrations needed", map[string]interface{}{
-			"database": d.name,
+			"database": d.Name,
 		})
 		return nil
 	}
 
 	if d.Options.OnMigrationsStarted != nil {
-		d.Options.OnMigrationsStarted()
+		d.Options.OnMigrationsStarted(d)
 	}
 
 	d.log.Info("Starting migrations", map[string]interface{}{
-		"database": d.name,
+		"database": d.Name,
 	})
 
 	lastUnfishedSyncronous := d.lastUnfinishedSynchrnous()
@@ -173,7 +182,7 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 		if m.Base().Status().Done {
 			if d.Options.DebugLogging {
 				d.log.Trace("Migration already done", map[string]interface{}{
-					"database": d.name,
+					"database": d.Name,
 					"library":  m.Base().Name.Library,
 					"name":     m.Base().Name.Name,
 				})
@@ -184,12 +193,14 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 		if m.Base().async && i > lastUnfishedSyncronous && !s.options.Overrides.EverythingSynchronous {
 			// This and all following migrations are async
 			d.log.Info("The remaining migrations are async starting from", map[string]interface{}{
-				"database": d.name,
+				"database": d.Name,
 				"library":  m.Base().Name.Library,
 				"name":     m.Base().Name.Name,
 			})
-			d.asyncInProgress = true
-			go d.asyncMigrate(ctx)
+			if !s.options.Overrides.MigrateOnly {
+				d.asyncInProgress = true
+				go d.asyncMigrate(ctx)
+			}
 			return nil
 		}
 		var stop bool
@@ -204,7 +215,7 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error) {
 	if d.Options.DebugLogging {
 		d.log.Debug("Starting migration", map[string]interface{}{
-			"database": d.name,
+			"database": d.Name,
 			"library":  m.Base().Name.Library,
 			"name":     m.Base().Name.Name,
 		})
@@ -232,7 +243,7 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 	}
 	err := d.driver.DoOneMigration(ctx, d.log, d, m)
 	if err != nil && d.Options.OnMigrationFailure != nil {
-		d.Options.OnMigrationFailure(m.Base().Name, err)
+		d.Options.OnMigrationFailure(d, m.Base().Name, err)
 	}
 	return false, err
 }
@@ -258,15 +269,15 @@ func (d *Database) allDone(m Migration, err error) {
 		err = errors.Wrapf(err, "Migration %s", m.Base().Name)
 	}
 	if d.Options.OnMigrationsComplete != nil {
-		d.Options.OnMigrationsComplete(err)
+		d.Options.OnMigrationsComplete(d, err)
 	}
 	if err == nil {
 		d.log.Info("Migrations complete", map[string]interface{}{
-			"database": d.name,
+			"database": d.Name,
 		})
 	} else {
 		d.log.Info("Migrations failed", map[string]interface{}{
-			"database": d.name,
+			"database": d.Name,
 			"error":    err,
 		})
 	}

@@ -47,13 +47,13 @@ func TestMysqlHappyPath(t *testing.T) {
 	options.ErrorOnUnknownMigrations = true
 
 	t.Log("if we fail a migration we will simply add that to the 'actions' array")
-	options.OnMigrationFailure = func(name libschema.MigrationName, err error) {
+	options.OnMigrationFailure = func(_ *libschema.Database, name libschema.MigrationName, err error) {
 		actions = append(actions, fmt.Sprintf("FAIL %s: %s", name, err))
 	}
-	options.OnMigrationsStarted = func() {
+	options.OnMigrationsStarted = func(_ *libschema.Database) {
 		actions = append(actions, "START")
 	}
-	options.OnMigrationsComplete = func(err error) {
+	options.OnMigrationsComplete = func(_ *libschema.Database, err error) {
 		if err != nil {
 			actions = append(actions, "COMPLETE: "+err.Error())
 		} else {

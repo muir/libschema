@@ -80,7 +80,7 @@ type Database struct {
 	migrationIndex    map[MigrationName]Migration
 	errors            []error
 	db                *sql.DB
-	name              string
+	Name              string
 	driver            Driver
 	sequence          []Migration // in order of execution
 	status            map[MigrationName]*MigrationStatus
@@ -93,7 +93,8 @@ type Database struct {
 }
 
 // Options operate at the Database level but are specified at the Schema level
-// at least initially.
+// at least initially.  If you want separate options on a per-Database basis,
+// you must override the values after attaching the database to the Schema.
 type Options struct {
 	// Overrides change the behavior of libschema in big ways: causing it to
 	// call os.Exit() when finished or not migrating.  If overrides is not
@@ -115,16 +116,18 @@ type Options struct {
 
 	// OnMigrationFailure is only called when there is a failure
 	// of a specific migration.  OnMigrationsComplete will also
-	// be called.
-	OnMigrationFailure func(n MigrationName, err error)
+	// be called.  OnMigrationFailure is called for each Database
+	// (if there is a failure).
+	OnMigrationFailure func(dbase *Database, n MigrationName, err error)
 
 	// OnMigrationsStarted is only called if migrations are needed
-	OnMigrationsStarted func()
+	// OnMigrationsStarted is called for each Database (if needed).
+	OnMigrationsStarted func(dbase *Database)
 
 	// OnMigrationsComplete called even if no migrations are needed.  It
 	// will be called when async migrations finish even if they finish
-	// with an error.
-	OnMigrationsComplete func(error)
+	// with an error.  OnMigrationsComplete is called for each Database.
+	OnMigrationsComplete func(dbase *Database, err error)
 
 	// DebugLogging turns on extra debug logging
 	DebugLogging bool
@@ -148,7 +151,7 @@ type MyLogger interface {
 	Error(msg string, fields ...map[string]interface{})
 }
 
-// New creates a schema object
+// New creates a schema object.
 func New(ctx context.Context, options Options) *Schema {
 	if options.TrackingTable == "" {
 		options.TrackingTable = DefaultTrackingTable
@@ -170,7 +173,7 @@ func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Drive
 		return nil, errors.Errorf("Duplicate database '%s'", name)
 	}
 	database := &Database{
-		name:           name,
+		Name:           name,
 		db:             db,
 		byLibrary:      make(map[string][]Migration),
 		migrationIndex: make(map[MigrationName]Migration),
@@ -254,16 +257,16 @@ func (d *Database) Migrations(libraryName string, migrations ...Migration) {
 		return
 	}
 	d.libraries = append(d.libraries, libraryName)
-	libList := make([]Migration, len(migrations))
+	mList := make([]Migration, len(migrations))
 	for i, migration := range migrations {
 		migration := migration.Copy()
 		migration.Base().Name.Library = libraryName
 		d.migrationIndex[migration.Base().Name] = migration
-		libList[i] = migration
+		mList[i] = migration
 		migration.Base().order = len(d.migrations)
 		d.migrations = append(d.migrations, migration)
 	}
-	d.byLibrary[libraryName] = libList
+	d.byLibrary[libraryName] = mList
 }
 
 func (m *MigrationBase) Status() MigrationStatus {
