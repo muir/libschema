@@ -20,16 +20,17 @@ type OverrideOptions struct {
 	// conjunction with MigrateDatabase unless there are only migrations for a single database.
 	MigrateDSN string `flag:"migrate-dsn" help:"Override *sql.DB, must combine with --migrate-database"`
 
-	// NoMigrate command line flag skips all migrations
+	// NoMigrate command line flag / config variable skips all migrations
 	NoMigrate bool `flag:"no-migrate" help:"Skip all migrations (except async)"`
 
-	// ExitIfMigrateNeeded command line flag causes Migrate() to return error if there are
+	// ExitIfMigrateNeeded command line flag / config variable causes Migrate() to return error if there are
 	// migrations required.  Asynchronous migrations do not count as required.
-	// In combination with EverythingSynchronous, async migrations will be run before
-	// Migrate() returns.
+	// In combination with EverythingSynchronous = &true, async migrations will be run before
+	// Migrate() returns.  In combination with EverythingSynchronous = &false, async migrations
+	// will be run in the background.
 	ExitIfMigrateNeeded bool `flag:"exit-if-migrate-needed" help:"Return error if migrations are not current"`
 
-	// TreateAsyncAsRequired command line flag causes asynchronous migrations to be
+	// TreateAsyncAsRequired command line flag / config variable causes asynchronous migrations to be
 	// treated like regular migrations from the point of view of --migrate-only, --no-migrate,
 	// and --exit-if-migrate-needed.
 	EverythingSynchronous *bool `flag:"migrate-all-synchronously" help:"Run async migrations synchronously"`
