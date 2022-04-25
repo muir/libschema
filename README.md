@@ -195,3 +195,39 @@ libschema.SkipThisAndRemainingIf(func() bool {
 This set of reverse migrations would always be small since it would just be enough to take you
 back to the current production release.
 
+## Patterns for applying migrations
+
+When using a migration tool like libschema there are several reasonable patterns one can
+follow to apply migrations to produciton code.
+
+### Down-Up deploys
+
+The simplist pattern is to deploy migrations synchronously when
+rolling out updates.  If you take your service down to do deploys
+then your migrations do not have to be backwards compatible.  This
+has the huge upside of allowing your schema to eveolve easily and
+avoid the build up to technical debt.  For example, if you have a
+column whose name is sub-optimal, you can simply rename it.
+
+To minimimize downtime so that the downtime doesn't matter in
+practice, run expensive migrations asynchronously.  Asychronous
+migrations are harder to define because they should be broken up
+into a whole bunch of smallish transactions.  The `RepeatUntilNoOp()`
+decorator may be useful.
+
+### Green-Blue deploys
+
+When you decide to run without downtime, one consequences is that
+all migrations must be backewards compatible.
+
+From a coding point-of-view, the simplest way to do this is to split
+the migration into a separate code change.  Any code that might be
+broken by the migration should be tested with the same code change.
+No other changes to code should be allowed in the same code change.
+Local and CI testing should apply the migration and validate that
+the the existing code isn't broken by the change in database schema.
+
+
+
+
+

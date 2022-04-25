@@ -131,6 +131,12 @@ type Options struct {
 
 	// DebugLogging turns on extra debug logging
 	DebugLogging bool
+
+	// DefaultTimeLimit imposes a TimeLimit on migrations that don't
+	// specify a time limit themselves.  This requires that all migrations
+	// are written idempotently. This limit is per-migration.  There is no
+	// overall time limit.  XXX
+	DefaultTimeLimit time.Duration
 }
 
 // Schema tracks all the migrations
@@ -194,6 +200,29 @@ func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Drive
 func Asynchronous() MigrationOption {
 	return func(m Migration) {
 		m.Base().async = true
+	}
+}
+
+// RepeatUntilNoOp marks a migration as potentially being needed to run multiple times.
+// It will run over and over until the database reports that the migration
+// modified no rows.  This can useuflly be combined with Asychnronous.  Write the migration
+// with a built-in limit on how many rows should be modified.
+func RepeatUntilNoOp() Migration {
+	return func(m Migration) {
+		m.Base().repeatUntilNoOp = true
+	}
+}
+
+// TimeLimit marks a migration as required to complete with a specific amount of time.
+// The `Context` used for the database command will be cancelled what that amount of
+// time has passed.  This potentially leaves the migration in an indeterminate state
+// because the migration could complete just as the context is cancelled.  Migrations
+// with a time limit must use idempotent commands.  MySQL migrations already must use
+// idempotent commands so there is no additional burden when using MySQL.  A timeLimit
+// of zero overrides a DefaultTimeLimit if there is one.
+func WithTimeLimit(timeLimit time.Duration) {
+	return func(m Migration) {
+		m.Base().timeLimit = pointer.ToDuration(timeLimit)
 	}
 }
 
