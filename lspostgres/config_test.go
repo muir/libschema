@@ -21,7 +21,7 @@ import (
 func TestOverrideNothing(t *testing.T) {
 	var code string
 	var code2 string
-	err := doConfigMigrate(t, getDSN(t), true, &code, &code2, nil)
+	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, &code2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "m2async", code)
 	assert.Equal(t, "d2m1", code2)
@@ -30,7 +30,7 @@ func TestOverrideNothing(t *testing.T) {
 func TestOverrideMigrateOnly(t *testing.T) {
 	var code string
 	assert.PanicsWithValue(t, "test exit: migrate only", func() {
-		_ = doConfigMigrate(t, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
+		_, _ = doConfigMigrate(t, nil, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
 			MigrateOnly: true,
 		})
 	})
@@ -39,7 +39,7 @@ func TestOverrideMigrateOnly(t *testing.T) {
 
 func TestOverrideMigrateDatabaseNotMatching(t *testing.T) {
 	var code string
-	err := doConfigMigrate(t, getDSN(t), false, &code, nil, &libschema.OverrideOptions{
+	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, nil, &libschema.OverrideOptions{
 		MigrateDatabase: "notmatching",
 	})
 	if assert.Error(t, err) {
@@ -50,7 +50,7 @@ func TestOverrideMigrateDatabaseNotMatching(t *testing.T) {
 
 func TestOverrideMigrateDatabaseMatching(t *testing.T) {
 	var code string
-	err := doConfigMigrate(t, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
+	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
 		MigrateDatabase: "test",
 	})
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestOverrideMigrateDatabaseMatching(t *testing.T) {
 
 func TestOverrideMigrateDSNWithOneDatabase(t *testing.T) {
 	var code string
-	err := doConfigMigrate(t, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
+	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
 		MigrateDSN: getDSN(t),
 	})
 	require.NoError(t, err)
@@ -69,7 +69,7 @@ func TestOverrideMigrateDSNWithOneDatabase(t *testing.T) {
 func TestOverrideMigrateDSNWithoutDatabase(t *testing.T) {
 	var code string
 	var code2 string
-	err := doConfigMigrate(t, getDSN(t), true, &code, &code2, &libschema.OverrideOptions{
+	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, &code2, &libschema.OverrideOptions{
 		MigrateDSN: getDSN(t),
 	})
 	if assert.Error(t, err) {
@@ -82,7 +82,7 @@ func TestOverrideMigrateDSNWithoutDatabase(t *testing.T) {
 func TestOverrideMigrateDSNWithDatabaseSpecified(t *testing.T) {
 	var code string
 	var code2 string
-	err := doConfigMigrate(t, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
+	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
 		MigrateDatabase: "test2",
 		MigrateDSN:      getDSN(t),
 	})
@@ -94,12 +94,65 @@ func TestOverrideMigrateDSNWithDatabaseSpecified(t *testing.T) {
 func TestOverrideNoMigrate(t *testing.T) {
 	var code string
 	var code2 string
-	err := doConfigMigrate(t, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
+	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
 		NoMigrate: true,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "", code)
 	assert.Equal(t, "", code2)
+}
+
+func TestOverrideErrorIfMigrateNeeded(t *testing.T) {
+	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	t.Log("With ErrorIfMigrateNeeded: true we should get an error")
+	var code string
+	var code2 string
+	db, err := doConfigMigrate(t, &options, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
+		MigrateDatabase:      "test2",
+		ErrorIfMigrateNeeded: true,
+	})
+	defer func() {
+		t.Log("Closing db...")
+		if db != nil {
+			cleanup(db)
+			db.Close()
+		}
+		t.Log("done")
+	}()
+	require.Error(t, err)
+	assert.Equal(t, "", code)
+	assert.Equal(t, "", code2)
+	assert.Contains(t, err.Error(), "Migrations required for test2")
+
+	t.Log("Now we actually do the migrations")
+	_, err = doConfigMigrate(t, &options, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
+		MigrateDatabase:      "test2",
+		ErrorIfMigrateNeeded: false,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "", code)
+	assert.Equal(t, "d2m1", code2)
+
+	t.Log("With ErrorIfMigrateNeeded: true we should not get an error")
+	code2 = ""
+	_, err = doConfigMigrate(t, &options, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
+		MigrateDatabase:      "test2",
+		ErrorIfMigrateNeeded: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "", code)
+	assert.Equal(t, "", code2)
+}
+
+func TestOverrideEverythingSynchronous(t *testing.T) {
+	var code string
+	var code2 string
+	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
+		EverythingSynchronous: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "m2", code)
+	assert.Equal(t, "d2m1", code2)
 }
 
 func getDSN(t *testing.T) string {
@@ -110,27 +163,32 @@ func getDSN(t *testing.T) string {
 	return dsn
 }
 
-func doConfigMigrate(t *testing.T, dsn string, expectAsync bool, code *string, code2 *string, overrides *libschema.OverrideOptions) error {
+func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expectAsync bool, code *string, code2 *string, overrides *libschema.OverrideOptions) (*sql.DB, error) {
 	internal.TestingMode = true // panic instead of os.Exit()
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		return fmt.Errorf("open: %w", err)
+		return nil, fmt.Errorf("open: %w", err)
 	}
 	defer func() {
-		t.Log("Closing db...")
-		db.Close()
-		t.Log("done")
+		if options == nil {
+			t.Log("Closing db...")
+			db.Close()
+			t.Log("done")
+		}
 	}()
 
 	migrationComplete := make(chan struct{})
 	migrateReturned := make(chan struct{})
 
-	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
-	defer func() {
-		t.Log("Doing cleanup...")
-		cleanup(db)
-		t.Log("done")
-	}()
+	if options == nil {
+		opts, cleanup := lstesting.FakeSchema(t, "CASCADE")
+		defer func() {
+			t.Log("Doing cleanup...")
+			cleanup(db)
+			t.Log("done")
+		}()
+		options = &opts
+	}
 	options.DebugLogging = true
 	options.Overrides = overrides
 
@@ -139,7 +197,7 @@ func doConfigMigrate(t *testing.T, dsn string, expectAsync bool, code *string, c
 		t.Log("migrations complete ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 	}
 
-	s := libschema.New(context.Background(), options)
+	s := libschema.New(context.Background(), *options)
 
 	if code2 != nil {
 		_, cleanup2 := lstesting.FakeSchema(t, "CASCADE")
@@ -151,7 +209,7 @@ func doConfigMigrate(t *testing.T, dsn string, expectAsync bool, code *string, c
 
 		dbase2, err := lspostgres.New(testinglogur.Get(t), "test2", s, db)
 		if err != nil {
-			return fmt.Errorf("new2: %w", err)
+			return db, fmt.Errorf("new2: %w", err)
 		}
 		dbase2.Options.OnMigrationsComplete = nil
 
@@ -166,7 +224,7 @@ func doConfigMigrate(t *testing.T, dsn string, expectAsync bool, code *string, c
 
 	dbase, err := lspostgres.New(testinglogur.Get(t), "test", s, db)
 	if err != nil {
-		return fmt.Errorf("new: %w", err)
+		return db, fmt.Errorf("new: %w", err)
 	}
 
 	require.NotNil(t, dbase.Options.OnMigrationsComplete)
@@ -201,7 +259,7 @@ func doConfigMigrate(t *testing.T, dsn string, expectAsync bool, code *string, c
 	t.Log("migrate!")
 	err = s.Migrate(context.Background())
 	if err != nil {
-		return fmt.Errorf("migrate: %w", err)
+		return db, fmt.Errorf("migrate: %w", err)
 	}
 
 	close(migrateReturned)
@@ -216,5 +274,5 @@ func doConfigMigrate(t *testing.T, dsn string, expectAsync bool, code *string, c
 		nt.Stop()
 	}
 	t.Log("all done")
-	return nil
+	return db, nil
 }

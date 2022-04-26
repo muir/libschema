@@ -3,6 +3,7 @@ package libschema
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -49,6 +50,8 @@ type MigrationBase struct {
 	status          MigrationStatus
 	skipIf          func() (bool, error)
 	skipRemainingIf func() (bool, error)
+	repeatUntilNoOp bool           // XXX
+	timeLimit       *time.Duration // XXX
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -207,7 +210,7 @@ func Asynchronous() MigrationOption {
 // It will run over and over until the database reports that the migration
 // modified no rows.  This can useuflly be combined with Asychnronous.  Write the migration
 // with a built-in limit on how many rows should be modified.
-func RepeatUntilNoOp() Migration {
+func RepeatUntilNoOp() MigrationOption {
 	return func(m Migration) {
 		m.Base().repeatUntilNoOp = true
 	}
@@ -220,9 +223,9 @@ func RepeatUntilNoOp() Migration {
 // with a time limit must use idempotent commands.  MySQL migrations already must use
 // idempotent commands so there is no additional burden when using MySQL.  A timeLimit
 // of zero overrides a DefaultTimeLimit if there is one.
-func WithTimeLimit(timeLimit time.Duration) {
+func WithTimeLimit(timeLimit time.Duration) MigrationOption {
 	return func(m Migration) {
-		m.Base().timeLimit = pointer.ToDuration(timeLimit)
+		m.Base().timeLimit = &timeLimit
 	}
 }
 

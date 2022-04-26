@@ -66,7 +66,7 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 					finalErr = err
 				}
 			}()
-			if s.options.Overrides.ExitIfMigrateNeeded && !d.done(s) {
+			if s.options.Overrides.ErrorIfMigrateNeeded && !d.done(s) {
 				return errors.Errorf("Migrations required for %s", d.Name)
 			}
 			return d.migrate(ctx, s)

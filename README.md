@@ -218,16 +218,41 @@ decorator may be useful.
 ### Green-Blue deploys
 
 When you decide to run without downtime, one consequences is that
-all migrations must be backewards compatible.
+all migrations must be backewards compatible with the deployed
+code.
 
-From a coding point-of-view, the simplest way to do this is to split
-the migration into a separate code change.  Any code that might be
-broken by the migration should be tested with the same code change.
-No other changes to code should be allowed in the same code change.
-Local and CI testing should apply the migration and validate that
-the the existing code isn't broken by the change in database schema.
+DDL operations that are backwards compatible include:
 
+- adding a column, table, or view
+- removing a column, table, or view that is no longer accessed
+- adding a default value to a column
+- remvoing a constraint
+- adding a constraint as long as there are no violations and won't be any new ones
 
+From a coding point-of-view, the simplest way to manage developing
+with these restrictions is to separate the migration into a separate
+code change.  Any code that might be broken by the migration should
+be tested with the same code change.  No other changes to code
+should be allowed in the same code change.  Local and CI testing
+should apply the migration and validate that the the existing code
+isn't broken by the change in database schema.
 
+Only after the migration has been deployed can code that uses the 
+migration be deployed.  When using git, this can be done by having
+layered side branches: 
+main -> migration branch -> code branch -> cleanup migration branch.
 
+### Kubernetes and slow migrations
+
+One issue with using libschema to deploy changes is that servers can take
+a long time to come up if there are expensive migrations that need to be
+deployed first.  A solution for this is to use `OverrideOptions` to separate
+the migrations into a separate step and run them in an 
+[init container](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/).
+
+To do this use the `MigrateOnly` / `--migrate-only` option on your main program
+when running it in the init container.
+
+Then use the `ErrorIfMigrateNeeded` / `--error-if-migrate-needed` option on your main
+program when it starts up for normal use.
 
