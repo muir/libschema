@@ -3,7 +3,6 @@ package libschema
 import (
 	"context"
 	"database/sql"
-	"time"
 
 	"github.com/pkg/errors"
 )
@@ -50,8 +49,7 @@ type MigrationBase struct {
 	status          MigrationStatus
 	skipIf          func() (bool, error)
 	skipRemainingIf func() (bool, error)
-	repeatUntilNoOp bool           // XXX
-	timeLimit       *time.Duration // XXX
+	RepeatUntilNoOp bool
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -134,12 +132,6 @@ type Options struct {
 
 	// DebugLogging turns on extra debug logging
 	DebugLogging bool
-
-	// DefaultTimeLimit imposes a TimeLimit on migrations that don't
-	// specify a time limit themselves.  This requires that all migrations
-	// are written idempotently. This limit is per-migration.  There is no
-	// overall time limit.  XXX
-	DefaultTimeLimit time.Duration
 }
 
 // Schema tracks all the migrations
@@ -212,20 +204,7 @@ func Asynchronous() MigrationOption {
 // with a built-in limit on how many rows should be modified.
 func RepeatUntilNoOp() MigrationOption {
 	return func(m Migration) {
-		m.Base().repeatUntilNoOp = true
-	}
-}
-
-// TimeLimit marks a migration as required to complete with a specific amount of time.
-// The `Context` used for the database command will be cancelled what that amount of
-// time has passed.  This potentially leaves the migration in an indeterminate state
-// because the migration could complete just as the context is cancelled.  Migrations
-// with a time limit must use idempotent commands.  MySQL migrations already must use
-// idempotent commands so there is no additional burden when using MySQL.  A timeLimit
-// of zero overrides a DefaultTimeLimit if there is one.
-func WithTimeLimit(timeLimit time.Duration) MigrationOption {
-	return func(m Migration) {
-		m.Base().timeLimit = &timeLimit
+		m.Base().RepeatUntilNoOp = true
 	}
 }
 
