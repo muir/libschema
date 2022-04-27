@@ -87,7 +87,6 @@ type Database struct {
 	status            map[MigrationName]*MigrationStatus
 	parent            *Schema
 	Options           Options
-	Context           context.Context
 	log               MyLogger
 	asyncInProgress   bool
 	unknownMigrations []MigrationName
@@ -180,7 +179,6 @@ func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Drive
 		migrationIndex: make(map[MigrationName]Migration),
 		parent:         s,
 		Options:        s.options,
-		Context:        s.context,
 		driver:         driver,
 		log:            log,
 	}
