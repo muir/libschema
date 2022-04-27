@@ -74,7 +74,7 @@ func TestMysqlHappyPath(t *testing.T) {
 
 	defineMigrations := func(dbase *libschema.Database, extra bool) {
 		l1migrations := []libschema.Migration{
-			lsmysql.Generate("T1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+			lsmysql.Generate("T1", func(_ context.Context, _ *sql.Tx) string {
 				actions = append(actions, "MIGRATE: L1.T1")
 				return `CREATE TABLE IF NOT EXISTS T1 (id text) ENGINE = InnoDB`
 			}),
@@ -83,13 +83,13 @@ func TestMysqlHappyPath(t *testing.T) {
 			lsmysql.Script("T2pre2", `
 					INSERT INTO T3 (id) VALUES ('T2');`,
 				libschema.After("L2", "T3")),
-			lsmysql.Computed("T2", func(_ context.Context, _ libschema.MyLogger, tx *sql.Tx) error {
+			lsmysql.Computed("T2", func(_ context.Context, tx *sql.Tx) error {
 				actions = append(actions, "MIGRATE: L1.T2")
 				_, err := tx.Exec(`
 					CREATE TABLE IF NOT EXISTS T2 (id text) ENGINE = InnoDB`)
 				return err
 			}),
-			lsmysql.Generate("PT1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+			lsmysql.Generate("PT1", func(_ context.Context, _ *sql.Tx) string {
 				actions = append(actions, "MIGRATE: L1.PT1")
 				return `
 					INSERT INTO T1 (id) VALUES ('PT1');
@@ -102,7 +102,7 @@ func TestMysqlHappyPath(t *testing.T) {
 		}
 		if extra {
 			l1migrations = append(l1migrations,
-				lsmysql.Generate("G1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+				lsmysql.Generate("G1", func(_ context.Context, _ *sql.Tx) string {
 					actions = append(actions, "MIGRATE: G1")
 					return `
 						CREATE TABLE IF NOT EXISTS G1 (id text) ENGINE = InnoDB
@@ -116,7 +116,7 @@ func TestMysqlHappyPath(t *testing.T) {
 		dbase.Migrations("L2",
 			lsmysql.Script("T3pre", `
 					INSERT INTO T1 (id) VALUES ('T3');`),
-			lsmysql.Generate("T3", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+			lsmysql.Generate("T3", func(_ context.Context, _ *sql.Tx) string {
 				actions = append(actions, "MIGRATE: L2.T3")
 				return `
 					CREATE TABLE IF NOT EXISTS T3 (id text) ENGINE = InnoDB`
@@ -127,7 +127,7 @@ func TestMysqlHappyPath(t *testing.T) {
 					INSERT INTO T2 (id) VALUES ('T4');`),
 			lsmysql.Script("T4pre3", `
 					INSERT INTO T3 (id) VALUES ('T4');`),
-			lsmysql.Generate("T4", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+			lsmysql.Generate("T4", func(_ context.Context, _ *sql.Tx) string {
 				actions = append(actions, "MIGRATE: L2.T4")
 				return `
 					CREATE TABLE IF NOT EXISTS T4 (id text) ENGINE = InnoDB`

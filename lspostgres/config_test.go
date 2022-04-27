@@ -214,7 +214,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 		dbase2.Options.OnMigrationsComplete = nil
 
 		dbase2.Migrations("T2",
-			lspostgres.Generate("D1M1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+			lspostgres.Generate("D1M1", func(_ context.Context, _ *sql.Tx) string {
 				*code2 = "d2m1"
 				t.Log("migration D2M1")
 				return `CREATE TABLE D2M1 (id text)`
@@ -230,12 +230,12 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 	require.NotNil(t, dbase.Options.OnMigrationsComplete)
 
 	dbase.Migrations("L1",
-		lspostgres.Generate("M1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+		lspostgres.Generate("M1", func(_ context.Context, _ *sql.Tx) string {
 			*code = "m1"
 			t.Log("migration M1")
 			return `CREATE TABLE M1 (id text)`
 		}),
-		lspostgres.Generate("M2", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+		lspostgres.Generate("M2", func(_ context.Context, _ *sql.Tx) string {
 			if expectAsync {
 				t.Log("migration M2 waiting migration complete signal")
 				nt := time.NewTimer(time.Second)

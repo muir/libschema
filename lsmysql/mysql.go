@@ -50,8 +50,8 @@ func New(log libschema.MyLogger, name string, schema *libschema.Schema, db *sql.
 
 type mmigration struct {
 	libschema.MigrationBase
-	script   func(context.Context, libschema.MyLogger, *sql.Tx) string
-	computed func(context.Context, libschema.MyLogger, *sql.Tx) error
+	script   func(context.Context, *sql.Tx) string
+	computed func(context.Context, *sql.Tx) error
 }
 
 func (m *mmigration) Copy() libschema.Migration {
@@ -68,7 +68,7 @@ func (m *mmigration) Base() *libschema.MigrationBase {
 
 // Script creates a libschema.Migration from a SQL string
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
-	return Generate(name, func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+	return Generate(name, func(_ context.Context, _ *sql.Tx) string {
 		return sqlText
 	}, opts...)
 }
@@ -76,7 +76,7 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 // Generate creates a libschema.Migration from a function that returns a SQL string
 func Generate(
 	name string,
-	generator func(context.Context, libschema.MyLogger, *sql.Tx) string,
+	generator func(context.Context, *sql.Tx) string,
 	opts ...libschema.MigrationOption) libschema.Migration {
 	return mmigration{
 		MigrationBase: libschema.MigrationBase{
@@ -92,7 +92,7 @@ func Generate(
 // the migration directly.
 func Computed(
 	name string,
-	action func(context.Context, libschema.MyLogger, *sql.Tx) error,
+	action func(context.Context, *sql.Tx) error,
 	opts ...libschema.MigrationOption) libschema.Migration {
 	return mmigration{
 		MigrationBase: libschema.MigrationBase{
@@ -145,7 +145,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *l
 	}
 	pm := m.(*mmigration)
 	if pm.script != nil {
-		script := pm.script(ctx, log, tx)
+		script := pm.script(ctx, tx)
 		switch CheckScript(script) {
 		case Safe:
 		case DataAndDDL:
@@ -160,7 +160,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *l
 		}
 		err = errors.Wrap(err, script)
 	} else {
-		err = pm.computed(ctx, log, tx)
+		err = pm.computed(ctx, tx)
 	}
 	if err != nil {
 		err = errors.Wrapf(err, "Problem with migration %s", m.Base().Name)

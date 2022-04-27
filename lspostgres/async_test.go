@@ -53,11 +53,11 @@ func TestAsyncMigrations(t *testing.T) {
 
 	t.Log("define three migrations, two are async")
 	dbase.Migrations("L2",
-		lspostgres.Generate("M1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+		lspostgres.Generate("M1", func(_ context.Context, _ *sql.Tx) string {
 			t.Log("migration M1 running")
 			return `CREATE TABLE M1 (id text)`
 		}),
-		lspostgres.Generate("M2", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+		lspostgres.Generate("M2", func(_ context.Context, _ *sql.Tx) string {
 			t.Log("migration M2 waiting migration complete signal")
 			nt := time.NewTimer(time.Second)
 			select {
@@ -71,7 +71,7 @@ func TestAsyncMigrations(t *testing.T) {
 			t.Log("migration M2 running")
 			return `CREATE TABLE M2 (id text)`
 		}, libschema.Asynchronous()),
-		lspostgres.Generate("M3", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+		lspostgres.Generate("M3", func(_ context.Context, _ *sql.Tx) string {
 			t.Log("migration M3 running")
 			close(m3)
 			return `CREATE TABLE M3 (id text);`

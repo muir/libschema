@@ -256,3 +256,15 @@ when running it in the init container.
 Then use the `ErrorIfMigrateNeeded` / `--error-if-migrate-needed` option on your main
 program when it starts up for normal use.
 
+## Code Stability
+
+Libschema is still subject to changes.  Anything that is not backwards compatible
+will be clearly documented and will fail in a way that does not cause hidden problems.
+For example, switching from using "flag" to using OverrideOptions will trigger
+an obvious breakage if you try to use a flag that no longer works.
+
+Anticpated changes for the future:
+
+- API tweaks
+- Support for additional databases
+- Switch to a different logger API
