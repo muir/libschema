@@ -27,7 +27,7 @@ func New(log libschema.MyLogger, name string, schema *libschema.Schema, db *sql.
 type pmigration struct {
 	libschema.MigrationBase
 	script   func(context.Context, libschema.MyLogger, *sql.Tx) string
-	computed func(context.Context, libschema.MyLogger, libschema.Migration, *sql.Tx) error
+	computed func(context.Context, libschema.MyLogger, *sql.Tx) error
 }
 
 func (m *pmigration) Copy() libschema.Migration {
@@ -69,7 +69,7 @@ func Generate(
 // the migration directly.
 func Computed(
 	name string,
-	action func(context.Context, libschema.MyLogger, libschema.Migration, *sql.Tx) error,
+	action func(context.Context, libschema.MyLogger, *sql.Tx) error,
 	opts ...libschema.MigrationOption) libschema.Migration {
 	return pmigration{
 		MigrationBase: libschema.MigrationBase{
@@ -122,7 +122,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d
 		_, err = tx.Exec(script)
 		err = errors.Wrap(err, script)
 	} else {
-		err = pm.computed(ctx, log, m, tx)
+		err = pm.computed(ctx, log, tx)
 	}
 	if err != nil {
 		err = errors.Wrapf(err, "Problem with migration %s", m.Base().Name)

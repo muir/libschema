@@ -83,7 +83,7 @@ func TestMysqlHappyPath(t *testing.T) {
 			lsmysql.Script("T2pre2", `
 					INSERT INTO T3 (id) VALUES ('T2');`,
 				libschema.After("L2", "T3")),
-			lsmysql.Computed("T2", func(_ context.Context, _ libschema.MyLogger, _ libschema.Migration, tx *sql.Tx) error {
+			lsmysql.Computed("T2", func(_ context.Context, _ libschema.MyLogger, tx *sql.Tx) error {
 				actions = append(actions, "MIGRATE: L1.T2")
 				_, err := tx.Exec(`
 					CREATE TABLE IF NOT EXISTS T2 (id text) ENGINE = InnoDB`)

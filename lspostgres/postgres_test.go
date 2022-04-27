@@ -74,7 +74,7 @@ func TestPostgresMigrations(t *testing.T) {
 				actions = append(actions, "MIGRATE: L1.T1")
 				return `CREATE TABLE T1 (id text)`
 			}),
-			lspostgres.Computed("T2", func(_ context.Context, _ libschema.MyLogger, _ libschema.Migration, tx *sql.Tx) error {
+			lspostgres.Computed("T2", func(_ context.Context, _ libschema.MyLogger, tx *sql.Tx) error {
 				actions = append(actions, "MIGRATE: L1.T2")
 				_, err := tx.Exec(`
 				INSERT INTO T1 (id) VALUES ('T2');

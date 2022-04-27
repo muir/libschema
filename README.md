@@ -65,7 +65,7 @@ Migrations may be SQL strings or migrations can be done in Go:
 
 ```go
 database.Migrations("MyLibrary", 
-	lspostgres.Computed("importUsers", func(_ context.Context, _ MyLogger, tx *sql.Tx) error {
+	lspostgres.Computed("importUsers", func(_ context.Context, _ MyLogger, _ Migration, tx *sql.Tx) error {
 		// code to import users here
 	}),
 )
