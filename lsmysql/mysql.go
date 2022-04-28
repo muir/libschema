@@ -116,7 +116,7 @@ func (m mmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migrat
 
 // DoOneMigration applies a single migration.
 // It is expected to be called by libschema.
-func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (err error) {
+func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (result sql.Result, err error) {
 	// TODO: DRY
 	defer func() {
 		if err == nil {
@@ -127,7 +127,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 	}()
 	tx, err := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
 	if err != nil {
-		return errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
+		return nil, errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
 	}
 	defer func() {
 		if err != nil {
@@ -138,11 +138,11 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 	}()
 	if d.Options.SchemaOverride != "" {
 		if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
-			return errors.Errorf("Options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
+			return nil, errors.Errorf("Options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
 		}
 		_, err := tx.Exec(`USE ` + d.Options.SchemaOverride)
 		if err != nil {
-			return errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
+			return nil, errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 		}
 	}
 	pm := m.(*mmigration)
@@ -158,7 +158,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 			}
 		}
 		if err == nil {
-			_, err = tx.Exec(script)
+			result, err = tx.Exec(script)
 		}
 		err = errors.Wrap(err, script)
 	} else {
@@ -169,7 +169,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 		_ = tx.Rollback()
 		ntx, txerr := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
 		if txerr != nil {
-			return errors.Wrapf(err, "Tx for saving status for %s also failed with %s", m.Base().Name, txerr)
+			return nil, errors.Wrapf(err, "Tx for saving status for %s also failed with %s", m.Base().Name, txerr)
 		}
 		tx = ntx
 	}

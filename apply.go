@@ -252,7 +252,7 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			if err != nil {
 				return false, err
 			}
-			if ra != 0 {
+			if ra == 0 {
 				return false, nil
 			}
 			repeatCount++
