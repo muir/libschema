@@ -93,7 +93,7 @@ func (m pmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migrat
 
 // DoOneMigration applies a single migration.
 // It is expected to be called by libschema.
-func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (err error) {
+func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (result sql.Result, err error) {
 	defer func() {
 		if err == nil {
 			m.Base().SetStatus(libschema.MigrationStatus{
@@ -103,12 +103,12 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 	}()
 	tx, err := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
 	if err != nil {
-		return errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
+		return nil, errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
 	}
 	if d.Options.SchemaOverride != "" {
 		_, err := tx.Exec(`SET search_path TO ` + pq.QuoteIdentifier(d.Options.SchemaOverride))
 		if err != nil {
-			return errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
+			return nil, errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 		}
 	}
 	defer func() {
@@ -121,7 +121,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 	pm := m.(*pmigration)
 	if pm.script != nil {
 		script := pm.script(ctx, tx)
-		_, err = tx.Exec(script)
+		result, err = tx.Exec(script)
 		err = errors.Wrap(err, script)
 	} else {
 		err = pm.computed(ctx, tx)
@@ -131,7 +131,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 		_ = tx.Rollback()
 		ntx, txerr := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
 		if txerr != nil {
-			return errors.Wrapf(err, "Tx for saving status for %s also failed with %s", m.Base().Name, txerr)
+			return nil, errors.Wrapf(err, "Tx for saving status for %s also failed with %s", m.Base().Name, txerr)
 		}
 		tx = ntx
 	}

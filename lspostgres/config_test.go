@@ -193,7 +193,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 
 	options.OnMigrationsComplete = func(_ *libschema.Database, err error) {
 		close(migrationComplete)
-		t.Log("migrations complete ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+		t.Log("migrations complete")
 	}
 
 	s := libschema.New(context.Background(), *options)

@@ -21,7 +21,9 @@ type Driver interface {
 	// DoOneMigration must update the both the migration status in
 	// the Database object and it must persist the migration status
 	// in the tracking table.  It also does the migration.
-	DoOneMigration(context.Context, *internal.Log, *Database, Migration) error
+	// The returned sql.Result is optional: Computed() migrations do not
+	// need to provide results.  The result is used for RepeatUntilNoOp.
+	DoOneMigration(context.Context, *internal.Log, *Database, Migration) (sql.Result, error)
 
 	// IsMigrationSupported exists to guard against additional migration
 	// options and features.  It should return nil except if there are new
@@ -51,7 +53,7 @@ type MigrationBase struct {
 	status          MigrationStatus
 	skipIf          func() (bool, error)
 	skipRemainingIf func() (bool, error)
-	RepeatUntilNoOp bool
+	repeatUntilNoOp bool
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -190,11 +192,17 @@ func Asynchronous() MigrationOption {
 
 // RepeatUntilNoOp marks a migration as potentially being needed to run multiple times.
 // It will run over and over until the database reports that the migration
-// modified no rows.  This can useuflly be combined with Asychnronous.  Write the migration
-// with a built-in limit on how many rows should be modified.
+// modified no rows.  This can useuflly be combined with Asychnronous.
+//
+// This marking only applies to Script() and Generated() migrations.  The migration
+// must be a single statement.
+//
+// For Computed() migrations, do not use RepeatUntilNoOp.  Instead simply write the
+// migration use Driver.DB() to get a database handle and use it to do many little
+// transactions, each one modifying a few rows until there is no more work to do.
 func RepeatUntilNoOp() MigrationOption {
 	return func(m Migration) {
-		m.Base().RepeatUntilNoOp = true
+		m.Base().repeatUntilNoOp = true
 	}
 }
 

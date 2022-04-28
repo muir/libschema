@@ -241,11 +241,29 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			return true, nil
 		}
 	}
-	err := d.driver.DoOneMigration(ctx, d.log, d, m)
-	if err != nil && d.Options.OnMigrationFailure != nil {
-		d.Options.OnMigrationFailure(d, m.Base().Name, err)
+	var repeatCount int
+	for {
+		result, err := d.driver.DoOneMigration(ctx, d.log, d, m)
+		if err != nil && d.Options.OnMigrationFailure != nil {
+			d.Options.OnMigrationFailure(d, m.Base().Name, err)
+		}
+		if m.Base().repeatUntilNoOp && err == nil && result != nil {
+			ra, err := result.RowsAffected()
+			if err != nil {
+				return false, err
+			}
+			if ra != 0 {
+				return false, nil
+			}
+			repeatCount++
+			d.log.Info("migration modified rows, repeating", map[string]interface{}{
+				"repeatCount":  repeatCount,
+				"rowsModified": ra,
+			})
+			continue
+		}
+		return false, err
 	}
-	return false, err
 }
 
 func (d *Database) lastUnfinishedSynchrnous() int {
