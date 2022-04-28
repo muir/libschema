@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/muir/libschema"
+	"github.com/muir/libschema/internal"
+
 	"github.com/pkg/errors"
 )
 
@@ -41,7 +43,7 @@ type MySQL struct {
 }
 
 // New creates a libschema.Database with a mysql driver built in.
-func New(log libschema.MyLogger, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, *MySQL, error) {
+func New(log *internal.Log, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, *MySQL, error) {
 	m := &MySQL{db: db}
 	d, err := schema.NewDatabase(log, name, db, m)
 	m.databaseName = d.Options.SchemaOverride
@@ -114,7 +116,7 @@ func (m mmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migrat
 
 // DoOneMigration applies a single migration.
 // It is expected to be called by libschema.
-func (p *MySQL) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *libschema.Database, m libschema.Migration) (err error) {
+func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (err error) {
 	// TODO: DRY
 	defer func() {
 		if err == nil {
@@ -184,7 +186,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *l
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
 // It is expected to be called by libschema.
-func (p *MySQL) CreateSchemaTableIfNotExists(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) error {
+func (p *MySQL) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Log, d *libschema.Database) error {
 	schema, tableName, err := trackingSchemaTable(d)
 	if err != nil {
 		return err
@@ -251,7 +253,7 @@ func trackingTable(d *libschema.Database) string {
 	return table
 }
 
-func (p *MySQL) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.Database, m libschema.Migration, done bool, migrationError error) error {
+func (p *MySQL) saveStatus(log *internal.Log, tx *sql.Tx, d *libschema.Database, m libschema.Migration, done bool, migrationError error) error {
 	var estr string
 	if migrationError != nil {
 		estr = migrationError.Error()
@@ -278,7 +280,7 @@ func (p *MySQL) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.Data
 // does not release the lock.  We'll use a transaction just to make sure that
 // we're using the same connection.  If LockMigrationsTable succeeds, be sure to
 // call UnlockMigrationsTable.
-func (p *MySQL) LockMigrationsTable(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) error {
+func (p *MySQL) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *libschema.Database) error {
 	_, tableName, err := trackingSchemaTable(d)
 	if err != nil {
 		return err
@@ -302,7 +304,7 @@ func (p *MySQL) LockMigrationsTable(ctx context.Context, _ libschema.MyLogger, d
 
 // UnlockMigrationsTable unlocks the migration tracking table.
 // It is expected to be called by libschema.
-func (p *MySQL) UnlockMigrationsTable(_ libschema.MyLogger) error {
+func (p *MySQL) UnlockMigrationsTable(_ *internal.Log) error {
 	if p.lockTx == nil {
 		return errors.Errorf("libschema migrations table, not locked")
 	}
@@ -319,7 +321,7 @@ func (p *MySQL) UnlockMigrationsTable(_ libschema.MyLogger) error {
 
 // LoadStatus loads the current status of all migrations from the migration tracking table.
 // It is expected to be called by libschema.
-func (p *MySQL) LoadStatus(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) ([]libschema.MigrationName, error) {
+func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Database) ([]libschema.MigrationName, error) {
 	// TODO: DRY
 	tableName := trackingTable(d)
 	rows, err := d.DB().QueryContext(ctx, fmt.Sprintf(`
@@ -351,7 +353,7 @@ func (p *MySQL) LoadStatus(ctx context.Context, _ libschema.MyLogger, d *libsche
 // IsMigrationSupported checks to see if a migration is well-formed.  Absent a code change, this
 // should always return nil.
 // It is expected to be called by libschema.
-func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ libschema.MyLogger, migration libschema.Migration) error {
+func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ *internal.Log, migration libschema.Migration) error {
 	m, ok := migration.(*mmigration)
 	if !ok {
 		return fmt.Errorf("Non-postgres migration %s registered with postgres migrations", migration.Base().Name)

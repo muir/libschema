@@ -10,7 +10,6 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lstesting"
-	"github.com/muir/testinglogur"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,7 +68,7 @@ func TestMysqlHappyPath(t *testing.T) {
 	defer cleanup(db)
 
 	s := libschema.New(context.Background(), options)
-	dbase, _, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
+	dbase, _, err := lsmysql.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	defineMigrations := func(dbase *libschema.Database, extra bool) {
@@ -171,7 +170,7 @@ func TestMysqlHappyPath(t *testing.T) {
 
 	t.Log("now we will start a new set of migrations, starting by reading the migration state")
 	s = libschema.New(context.Background(), options)
-	dbase, _, err = lsmysql.New(testinglogur.Get(t), "test", s, db)
+	dbase, _, err = lsmysql.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase, 2nd time")
 
 	t.Log("Now we define slightly more migrations")
@@ -223,7 +222,7 @@ func TestMysqlNotAllowed(t *testing.T) {
 		defer db.Close()
 		defer cleanup(db)
 
-		dbase, _, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
+		dbase, _, err := lsmysql.New(libschema.LogFromLog(t), "test", s, db)
 		require.NoError(t, err, "libschema NewDatabase")
 
 		dbase.Migrations("L1", lsmysql.Script("x", tc.migration))

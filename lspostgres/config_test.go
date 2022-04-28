@@ -12,7 +12,6 @@ import (
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/lspostgres"
 	"github.com/muir/libschema/lstesting"
-	"github.com/muir/testinglogur"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -207,7 +206,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 			t.Log("done")
 		}()
 
-		dbase2, err := lspostgres.New(testinglogur.Get(t), "test2", s, db)
+		dbase2, err := lspostgres.New(libschema.LogFromLog(t), "test2", s, db)
 		if err != nil {
 			return db, fmt.Errorf("new2: %w", err)
 		}
@@ -222,7 +221,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 		)
 	}
 
-	dbase, err := lspostgres.New(testinglogur.Get(t), "test", s, db)
+	dbase, err := lspostgres.New(libschema.LogFromLog(t), "test", s, db)
 	if err != nil {
 		return db, fmt.Errorf("new: %w", err)
 	}

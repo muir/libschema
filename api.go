@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/muir/libschema/internal"
+
 	"github.com/pkg/errors"
 )
 
@@ -12,22 +14,22 @@ const DefaultTrackingTable = "libschema.migration_status"
 // Driver interface is what's required to use libschema with a new
 // database.
 type Driver interface {
-	CreateSchemaTableIfNotExists(context.Context, MyLogger, *Database) error
-	LockMigrationsTable(context.Context, MyLogger, *Database) error
-	UnlockMigrationsTable(MyLogger) error
+	CreateSchemaTableIfNotExists(context.Context, *internal.Log, *Database) error
+	LockMigrationsTable(context.Context, *internal.Log, *Database) error
+	UnlockMigrationsTable(*internal.Log) error
 
 	// DoOneMigration must update the both the migration status in
 	// the Database object and it must persist the migration status
 	// in the tracking table.  It also does the migration.
-	DoOneMigration(context.Context, MyLogger, *Database, Migration) error
+	DoOneMigration(context.Context, *internal.Log, *Database, Migration) error
 
 	// IsMigrationSupported exists to guard against additional migration
 	// options and features.  It should return nil except if there are new
 	// migration features added that haven't been included in all support
 	// libraries.
-	IsMigrationSupported(*Database, MyLogger, Migration) error
+	IsMigrationSupported(*Database, *internal.Log, Migration) error
 
-	LoadStatus(context.Context, MyLogger, *Database) ([]MigrationName, error)
+	LoadStatus(context.Context, *internal.Log, *Database) ([]MigrationName, error)
 }
 
 // MigrationName holds both the name of the specific migration and the library to
@@ -87,7 +89,7 @@ type Database struct {
 	status            map[MigrationName]*MigrationStatus
 	parent            *Schema
 	Options           Options
-	log               MyLogger
+	log               *internal.Log
 	asyncInProgress   bool
 	unknownMigrations []MigrationName
 }
@@ -141,16 +143,6 @@ type Schema struct {
 	context       context.Context
 }
 
-// MyLogger defines the logging API that libschema uses.
-// See https://github.com/logur/logur#readme
-type MyLogger interface {
-	Trace(msg string, fields ...map[string]interface{})
-	Debug(msg string, fields ...map[string]interface{})
-	Info(msg string, fields ...map[string]interface{})
-	Warn(msg string, fields ...map[string]interface{})
-	Error(msg string, fields ...map[string]interface{})
-}
-
 // New creates a schema object.
 func New(ctx context.Context, options Options) *Schema {
 	if options.TrackingTable == "" {
@@ -168,7 +160,7 @@ func New(ctx context.Context, options Options) *Schema {
 
 // NewDatabase creates a Database object.  For Postgres and Mysql this is bundled into
 // lspostgres.New() and lsmysql.New().
-func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Driver) (*Database, error) {
+func (s *Schema) NewDatabase(log *internal.Log, name string, db *sql.DB, driver Driver) (*Database, error) {
 	if _, ok := s.databases[name]; ok {
 		return nil, errors.Errorf("Duplicate database '%s'", name)
 	}

@@ -10,7 +10,6 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lspostgres"
 	"github.com/muir/libschema/lstesting"
-	"github.com/muir/testinglogur"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,7 +47,7 @@ func TestAsyncMigrations(t *testing.T) {
 	}()
 
 	s := libschema.New(context.Background(), options)
-	dbase, err := lspostgres.New(testinglogur.Get(t), "test", s, db)
+	dbase, err := lspostgres.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	t.Log("define three migrations, two are async")

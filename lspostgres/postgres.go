@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lib/pq"
 	"github.com/muir/libschema"
+	"github.com/muir/libschema/internal"
+
+	"github.com/lib/pq"
 	"github.com/pkg/errors"
 )
 
@@ -20,7 +22,7 @@ type Postgres struct {
 }
 
 // New creates a libschema.Database with a postgres driver built in.
-func New(log libschema.MyLogger, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, error) {
+func New(log *internal.Log, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, error) {
 	return schema.NewDatabase(log, name, db, &Postgres{})
 }
 
@@ -91,7 +93,7 @@ func (m pmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migrat
 
 // DoOneMigration applies a single migration.
 // It is expected to be called by libschema.
-func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d *libschema.Database, m libschema.Migration) (err error) {
+func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (err error) {
 	defer func() {
 		if err == nil {
 			m.Base().SetStatus(libschema.MigrationStatus{
@@ -146,7 +148,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log libschema.MyLogger, d
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
 // It is expected to be called by libschema.
-func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) error {
+func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Log, d *libschema.Database) error {
 	schema, tableName, err := trackingSchemaTable(d)
 	if err != nil {
 		return err
@@ -197,7 +199,7 @@ func trackingTable(d *libschema.Database) string {
 	return table
 }
 
-func (p *Postgres) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.Database, m libschema.Migration, done bool, migrationError error) error {
+func (p *Postgres) saveStatus(log *internal.Log, tx *sql.Tx, d *libschema.Database, m libschema.Migration, done bool, migrationError error) error {
 	var estr string
 	if migrationError != nil {
 		estr = migrationError.Error()
@@ -225,7 +227,7 @@ func (p *Postgres) saveStatus(log libschema.MyLogger, tx *sql.Tx, d *libschema.D
 // LockMigrationsTable locks the migration tracking table for exclusive use by the
 // migrations running now.
 // It is expected to be called by libschema.
-func (p *Postgres) LockMigrationsTable(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) error {
+func (p *Postgres) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *libschema.Database) error {
 	tableName := trackingTable(d)
 	if p.lockTx != nil {
 		return errors.Errorf("libschema migrations table, '%s' already locked", tableName)
@@ -256,7 +258,7 @@ func (p *Postgres) LockMigrationsTable(ctx context.Context, _ libschema.MyLogger
 
 // UnlockMigrationsTable unlocks the migration tracking table.
 // It is expected to be called by libschema.
-func (p *Postgres) UnlockMigrationsTable(_ libschema.MyLogger) error {
+func (p *Postgres) UnlockMigrationsTable(_ *internal.Log) error {
 	if p.lockTx == nil {
 		return errors.Errorf("libschema migrations table, not locked")
 	}
@@ -267,7 +269,7 @@ func (p *Postgres) UnlockMigrationsTable(_ libschema.MyLogger) error {
 
 // LoadStatus loads the current status of all migrations from the migration tracking table.
 // It is expected to be called by libschema.
-func (p *Postgres) LoadStatus(ctx context.Context, _ libschema.MyLogger, d *libschema.Database) ([]libschema.MigrationName, error) {
+func (p *Postgres) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Database) ([]libschema.MigrationName, error) {
 	tableName := trackingTable(d)
 	rows, err := d.DB().QueryContext(ctx, fmt.Sprintf(`
 		SELECT	library, migration, done
@@ -299,7 +301,7 @@ func (p *Postgres) LoadStatus(ctx context.Context, _ libschema.MyLogger, d *libs
 // IsMigrationSupported checks to see if a migration is well-formed.  Absent a code change, this
 // should always return nil.
 // It is expected to be called by libschema.
-func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ libschema.MyLogger, migration libschema.Migration) error {
+func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ *internal.Log, migration libschema.Migration) error {
 	m, ok := migration.(*pmigration)
 	if !ok {
 		return fmt.Errorf("Non-postgres migration %s registered with postgres migrations", migration.Base().Name)

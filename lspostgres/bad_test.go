@@ -9,7 +9,6 @@ import (
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lspostgres"
 	"github.com/muir/libschema/lstesting"
-	"github.com/muir/testinglogur"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,7 +70,7 @@ func testBadMigration(t *testing.T, expected string, define func(*libschema.Data
 	defer cleanup(db)
 
 	s := libschema.New(context.Background(), options)
-	dbase, err := lspostgres.New(testinglogur.Get(t), "test", s, db)
+	dbase, err := lspostgres.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	t.Log("now we define the migrations")

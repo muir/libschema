@@ -10,7 +10,6 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lspostgres"
 	"github.com/muir/libschema/lstesting"
-	"github.com/muir/testinglogur"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -65,7 +64,7 @@ func TestPostgresMigrations(t *testing.T) {
 	defer cleanup(db)
 
 	s := libschema.New(context.Background(), options)
-	dbase, err := lspostgres.New(testinglogur.Get(t), "test", s, db)
+	dbase, err := lspostgres.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	defineMigrations := func(dbase *libschema.Database, extra bool) {
@@ -163,7 +162,7 @@ func TestPostgresMigrations(t *testing.T) {
 	assert.Equal(t, []string{"t1", "t2", "t3", "t4", "tracking_table"}, names, "table names")
 
 	s = libschema.New(context.Background(), options)
-	dbase, err = lspostgres.New(testinglogur.Get(t), "test", s, db)
+	dbase, err = lspostgres.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	t.Log("Now we define slightly more migrations")
