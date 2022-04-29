@@ -77,6 +77,10 @@ func TestMysqlHappyPath(t *testing.T) {
 				actions = append(actions, "MIGRATE: L1.T1")
 				return `CREATE TABLE IF NOT EXISTS T1 (id text) ENGINE = InnoDB`
 			}),
+			lsmysql.Script("PT1skip", `INSERT INTO T3 T3 T3 (id) VALUES ('PT1');`,
+				libschema.SkipIf(func() (bool, error) {
+					return true, nil
+				})),
 			lsmysql.Script("T2pre", `
 					INSERT INTO T1 (id) VALUES ('T2');`),
 			lsmysql.Script("T2pre2", `
