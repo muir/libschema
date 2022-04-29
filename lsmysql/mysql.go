@@ -246,7 +246,7 @@ func trackingSchemaTable(d *libschema.Database) (string, string, error) {
 }
 
 // trackingTable returns the schema+table reference for the migration tracking table.
-// The name is already quoted properly for use as a save postgres identifier.
+// The name is already quoted properly for use as a save mysql identifier.
 // TODO: DRY
 func trackingTable(d *libschema.Database) string {
 	_, table, _ := trackingSchemaTable(d)
@@ -356,7 +356,7 @@ func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Da
 func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ *internal.Log, migration libschema.Migration) error {
 	m, ok := migration.(*mmigration)
 	if !ok {
-		return fmt.Errorf("Non-postgres migration %s registered with postgres migrations", migration.Base().Name)
+		return fmt.Errorf("Non-mysql migration %s registered with mysql migrations", migration.Base().Name)
 	}
 	if m.script != nil {
 		return nil

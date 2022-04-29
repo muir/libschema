@@ -1,7 +1,8 @@
-package lspostgres_test
+package lsmysql_test
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBadMigrationsPostgres(t *testing.T) {
+func TestBadMigrationsMysql(t *testing.T) {
 	cases := []struct {
 		name   string
 		error  string
@@ -22,16 +23,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 	}{
 		{
 			name:  "table missing",
-			error: `relation "t1" does not exist`,
-			define: func(dbase *libschema.Database) {
-				dbase.Migrations("L2",
-					lspostgres.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`),
-				)
-			},
-		},
-		{
-			name:  "wrong db",
-			error: `Non-postgres`,
+			error: `.T1' doesn't exist`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2",
 					lsmysql.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`),
@@ -39,25 +31,55 @@ func TestBadMigrationsPostgres(t *testing.T) {
 			},
 		},
 		{
-			name:  "duplicate library",
-			error: `duplicate library 'L2'`,
+			name:  "wrong db",
+			error: `Non-mysql`,
 			define: func(dbase *libschema.Database) {
-				dbase.Migrations("L2", lspostgres.Script("T4", `CREATE TABLE T1 (id text)`))
-				dbase.Migrations("L2", lspostgres.Script("T5", `CREATE TABLE T2 (id text)`))
+				dbase.Migrations("L2",
+					lspostgres.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`),
+				)
 			},
 		},
 		{
-			name:  "bad table",
+			name:  "duplicate library",
+			error: `duplicate library 'L2'`,
+			define: func(dbase *libschema.Database) {
+				dbase.Migrations("L2", lsmysql.Script("T4", `CREATE TABLE T1 (id text)`))
+				dbase.Migrations("L2", lsmysql.Script("T5", `CREATE TABLE T2 (id text)`))
+			},
+		},
+		{
+			name:  "bad table1",
 			error: `Tracking table 'foo.bar.baz' is not valid`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "foo.bar.baz"
 			},
 		},
 		{
-			name:  "bad schema",
-			error: `no schema has been selected to create in`,
+			name:  "bad table2",
+			error: `Tracking table schema name must be a simple identifier, not 'foo'bar'`,
 			reopt: func(o *libschema.Options) {
-				o.SchemaOverride = "foo.bar.baz"
+				o.TrackingTable = "foo'bar.baz"
+			},
+		},
+		{
+			name:  "bad table3",
+			error: `Tracking table table name must be a simple identifier, not 'bar'baz'`,
+			reopt: func(o *libschema.Options) {
+				o.TrackingTable = "foo.bar'baz"
+			},
+		},
+		{
+			name:  "bad table4",
+			error: `Tracking table table name must be a simple identifier, not 'bar'baz'`,
+			reopt: func(o *libschema.Options) {
+				o.TrackingTable = "bar'baz"
+			},
+		},
+		{
+			name:  "bad schema",
+			error: `Options.SchemaOverride must be a simple identifier`,
+			reopt: func(o *libschema.Options) {
+				o.SchemaOverride = `"foo."bar.baz"`
 			},
 		},
 	}
@@ -71,15 +93,15 @@ func TestBadMigrationsPostgres(t *testing.T) {
 }
 
 func testBadMigration(t *testing.T, expected string, define func(*libschema.Database), reopt func(*libschema.Options)) {
-	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
+	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
 	if dsn == "" {
-		t.Skip("Set $LIBSCHEMA_POSTGRES_TEST_DSN to test libschema/lspostgres")
+		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
 	}
 
-	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	options, cleanup := lstesting.FakeSchema(t, "")
 	options.DebugLogging = true
 
-	db, err := libschema.OpenAnyDB(dsn)
+	db, err := sql.Open("mysql", dsn)
 	require.NoError(t, err, "open database")
 	defer db.Close()
 	defer cleanup(db)
@@ -89,14 +111,14 @@ func testBadMigration(t *testing.T, expected string, define func(*libschema.Data
 	}
 
 	s := libschema.New(context.Background(), options)
-	dbase, err := lspostgres.New(libschema.LogFromLog(t), "test", s, db)
+	dbase, _, err := lsmysql.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	t.Log("now we define the migrations")
 	if define != nil {
 		define(dbase)
 	} else {
-		dbase.Migrations("L2", lspostgres.Script("T9", `CREATE TABLE T1 (id text)`))
+		dbase.Migrations("L2", lsmysql.Script("T4", `CREATE TABLE T1 (id text)`))
 	}
 
 	err = s.Migrate(context.Background())
