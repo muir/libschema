@@ -11,22 +11,26 @@ Install:
 
 ## DDL Transactions
 
-MySQL and MariaDB do not support DDL (Data Definition Language) transactions like
-`CREATE TABLE`.  Such commands cause the current transaction to switch to `autocommit`
-mode.
+MySQL and MariaDB do not support transactions around DDL (Data
+Definition Language) changes like `CREATE TABLE`.  Such commands
+cause the current transaction to switch to `autocommit` mode.
 
-The consequence of this is that it is not possible for a schema migration tool,
-like libschema, to track if a migration has been applied or not by tracking the status
-of a transaction.
+The consequence of this is that it is not possible for a schema
+migration tool, like libschema, to track if a migration has been
+applied or not by tracking the status of a transaction (did it error
+or succeed?)
 
-When working with MySQL and MariaDB, schema-changing migrations should be done 
-separately from data-changing migrations.  Schema-changing transactions that are 
-idempotent are safe and require no special handling.
+When working with MySQL and MariaDB, schema-changing migrations
+should be done separately from data-changing migrations.  Schema-changing
+transactions that are idempotent are safe and require no special
+handling.
 
-Schema-changing transactions that are not idempotent need to be guarded with conditionals
-so that they're skipped if they've already been applied.
+Schema-changing transactions that are not idempotent need to be
+guarded with conditionals so that they're skipped if they've already
+been applied.
 
-Fortunately, `IF EXISTS` and `IF NOT EXISTS` clauses can be most of the DDL statements.
+Fortunately, `IF EXISTS` and `IF NOT EXISTS` clauses can be added
+to most of the DDL statements.
 
 ### Conditionals
 
@@ -87,11 +91,14 @@ database.Migrations("MyLibrary",
 
 ### Some notes on MySQL
 
-While most identifiers (table names, etc) can be `"`quoted`"`, you cannot use quotes around
-a schema (database really) name with `CREATE SCHEMA`.
+While most identifiers (table names, etc) can be `"`quoted`"`, you
+cannot use quotes around a schema (database really) name with `CREATE
+SCHEMA`.
 
-MySQL does not support schemas.  A schema is just a synonym for `DATABASE` in the MySQL world.
-This means that it is easier to put migrations tracking table in the same schema (database) as
-the rest of the tables.  It also means that to run migration unit tests, the DSN for testing
-has to give access to a user that can create and drop databases.
+MySQL does not support schemas.  A schema is just a synonym for
+`DATABASE` in the MySQL world.  This means that it is easier to put
+migrations tracking table in the same schema (database) as the rest
+of the tables.  It also means that to run migration unit tests, the
+DSN for testing has to give access to a user that can create and
+drop databases.
 
