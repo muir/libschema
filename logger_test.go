@@ -10,7 +10,7 @@ import (
 )
 
 // mostly this just needs to compile
-func LogFromThings(t *testing.T) {
+func TestLogFromThings(t *testing.T) {
 	_ = libschema.LogFromPrintln(log.Default())
 	_ = libschema.LogFromLog(t)
 	log := libschema.LogFromLogur(testinglogur.Get(t))
