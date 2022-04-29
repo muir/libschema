@@ -62,6 +62,23 @@ func TestBadMigrationsMysql(t *testing.T) {
 			},
 		},
 		{
+			name:  "non idempotent",
+			error: `Unconditional migration has non-idempotent DDL (Data Definition Language [schema changes]`,
+			define: func(dbase *libschema.Database) {
+				dbase.Migrations("L2", lsmysql.Script("T4", `CREATE TABLE T1 (id text) TYPE = InnoDB`))
+			},
+		},
+		{
+			name:  "combines data & ddl",
+			error: `Migration combines DDL (Data Definition Language [schema changes]) and data manipulation`,
+			define: func(dbase *libschema.Database) {
+				dbase.Migrations("L2", lsmysql.Script("T4", `
+					CREATE TABLE IF NOT EXISTST1 (id text) TYPE = InnoDB;
+					INSERT INTO T1 (id) VALUES ('foo');
+					`))
+			},
+		},
+		{
 			name:  "bad table3",
 			error: `Tracking table table name must be a simple identifier, not 'bar'baz'`,
 			reopt: func(o *libschema.Options) {
