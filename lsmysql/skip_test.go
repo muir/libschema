@@ -10,7 +10,6 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lstesting"
-	"github.com/muir/testinglogur"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +31,7 @@ func TestSkipFunctions(t *testing.T) {
 	_ = cleanup
 	// defer cleanup(db)
 
-	dbase, m, err := lsmysql.New(testinglogur.Get(t), "test", s, db)
+	dbase, m, err := lsmysql.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	dbase.Migrations("T",

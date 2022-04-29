@@ -10,7 +10,6 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lspostgres"
 	"github.com/muir/libschema/lstesting"
-	"github.com/muir/testinglogur"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +26,7 @@ func TestAsyncMigrations(t *testing.T) {
 
 	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
 	options.ErrorOnUnknownMigrations = true
-	options.OnMigrationsComplete = func(err error) {
+	options.OnMigrationsComplete = func(_ *libschema.Database, err error) {
 		assert.NoError(t, err, "completion error")
 		time.Sleep(10 * time.Millisecond)
 		close(migrationComplete)
@@ -48,16 +47,16 @@ func TestAsyncMigrations(t *testing.T) {
 	}()
 
 	s := libschema.New(context.Background(), options)
-	dbase, err := lspostgres.New(testinglogur.Get(t), "test", s, db)
+	dbase, err := lspostgres.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	t.Log("define three migrations, two are async")
 	dbase.Migrations("L2",
-		lspostgres.Generate("M1", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+		lspostgres.Generate("M1", func(_ context.Context, _ *sql.Tx) string {
 			t.Log("migration M1 running")
 			return `CREATE TABLE M1 (id text)`
 		}),
-		lspostgres.Generate("M2", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+		lspostgres.Generate("M2", func(_ context.Context, _ *sql.Tx) string {
 			t.Log("migration M2 waiting migration complete signal")
 			nt := time.NewTimer(time.Second)
 			select {
@@ -71,7 +70,7 @@ func TestAsyncMigrations(t *testing.T) {
 			t.Log("migration M2 running")
 			return `CREATE TABLE M2 (id text)`
 		}, libschema.Asynchronous()),
-		lspostgres.Generate("M3", func(_ context.Context, _ libschema.MyLogger, _ *sql.Tx) string {
+		lspostgres.Generate("M3", func(_ context.Context, _ *sql.Tx) string {
 			t.Log("migration M3 running")
 			close(m3)
 			return `CREATE TABLE M3 (id text);`

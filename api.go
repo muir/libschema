@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/muir/libschema/internal"
+
 	"github.com/pkg/errors"
 )
 
@@ -12,22 +14,24 @@ const DefaultTrackingTable = "libschema.migration_status"
 // Driver interface is what's required to use libschema with a new
 // database.
 type Driver interface {
-	CreateSchemaTableIfNotExists(context.Context, MyLogger, *Database) error
-	LockMigrationsTable(context.Context, MyLogger, *Database) error
-	UnlockMigrationsTable(MyLogger) error
+	CreateSchemaTableIfNotExists(context.Context, *internal.Log, *Database) error
+	LockMigrationsTable(context.Context, *internal.Log, *Database) error
+	UnlockMigrationsTable(*internal.Log) error
 
 	// DoOneMigration must update the both the migration status in
 	// the Database object and it must persist the migration status
 	// in the tracking table.  It also does the migration.
-	DoOneMigration(context.Context, MyLogger, *Database, Migration) error
+	// The returned sql.Result is optional: Computed() migrations do not
+	// need to provide results.  The result is used for RepeatUntilNoOp.
+	DoOneMigration(context.Context, *internal.Log, *Database, Migration) (sql.Result, error)
 
 	// IsMigrationSupported exists to guard against additional migration
 	// options and features.  It should return nil except if there are new
 	// migration features added that haven't been included in all support
 	// libraries.
-	IsMigrationSupported(*Database, MyLogger, Migration) error
+	IsMigrationSupported(*Database, *internal.Log, Migration) error
 
-	LoadStatus(context.Context, MyLogger, *Database) ([]MigrationName, error)
+	LoadStatus(context.Context, *internal.Log, *Database) ([]MigrationName, error)
 }
 
 // MigrationName holds both the name of the specific migration and the library to
@@ -49,6 +53,7 @@ type MigrationBase struct {
 	status          MigrationStatus
 	skipIf          func() (bool, error)
 	skipRemainingIf func() (bool, error)
+	repeatUntilNoOp bool
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -80,21 +85,26 @@ type Database struct {
 	migrationIndex    map[MigrationName]Migration
 	errors            []error
 	db                *sql.DB
-	name              string
+	Name              string
 	driver            Driver
 	sequence          []Migration // in order of execution
 	status            map[MigrationName]*MigrationStatus
 	parent            *Schema
 	Options           Options
-	Context           context.Context
-	log               MyLogger
+	log               *internal.Log
 	asyncInProgress   bool
 	unknownMigrations []MigrationName
 }
 
 // Options operate at the Database level but are specified at the Schema level
-// at least initially.
+// at least initially.  If you want separate options on a per-Database basis,
+// you must override the values after attaching the database to the Schema.
 type Options struct {
+	// Overrides change the behavior of libschema in big ways: causing it to
+	// call os.Exit() when finished or not migrating.  If overrides is not
+	// specified then DefaultOverrides is used.
+	Overrides *OverrideOptions
+
 	// TrackingTable is the name of the table used to track which migrations
 	// have been applied
 	TrackingTable string
@@ -110,16 +120,18 @@ type Options struct {
 
 	// OnMigrationFailure is only called when there is a failure
 	// of a specific migration.  OnMigrationsComplete will also
-	// be called.
-	OnMigrationFailure func(n MigrationName, err error)
+	// be called.  OnMigrationFailure is called for each Database
+	// (if there is a failure).
+	OnMigrationFailure func(dbase *Database, n MigrationName, err error)
 
 	// OnMigrationsStarted is only called if migrations are needed
-	OnMigrationsStarted func()
+	// OnMigrationsStarted is called for each Database (if needed).
+	OnMigrationsStarted func(dbase *Database)
 
 	// OnMigrationsComplete called even if no migrations are needed.  It
 	// will be called when async migrations finish even if they finish
-	// with an error.
-	OnMigrationsComplete func(error)
+	// with an error.  OnMigrationsComplete is called for each Database.
+	OnMigrationsComplete func(dbase *Database, err error)
 
 	// DebugLogging turns on extra debug logging
 	DebugLogging bool
@@ -133,20 +145,13 @@ type Schema struct {
 	context       context.Context
 }
 
-// See https://github.com/logur/logur#readme
-// This interface definition will not
-type MyLogger interface {
-	Trace(msg string, fields ...map[string]interface{})
-	Debug(msg string, fields ...map[string]interface{})
-	Info(msg string, fields ...map[string]interface{})
-	Warn(msg string, fields ...map[string]interface{})
-	Error(msg string, fields ...map[string]interface{})
-}
-
-// New creates a schema object
+// New creates a schema object.
 func New(ctx context.Context, options Options) *Schema {
 	if options.TrackingTable == "" {
 		options.TrackingTable = DefaultTrackingTable
+	}
+	if options.Overrides == nil {
+		options.Overrides = &DefaultOverrides
 	}
 	return &Schema{
 		options:   options,
@@ -155,20 +160,19 @@ func New(ctx context.Context, options Options) *Schema {
 	}
 }
 
-// NewDatabase creates a Database object.  For Postgres, this is bundled into
-// lspostgres.New().
-func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Driver) (*Database, error) {
+// NewDatabase creates a Database object.  For Postgres and Mysql this is bundled into
+// lspostgres.New() and lsmysql.New().
+func (s *Schema) NewDatabase(log *internal.Log, name string, db *sql.DB, driver Driver) (*Database, error) {
 	if _, ok := s.databases[name]; ok {
 		return nil, errors.Errorf("Duplicate database '%s'", name)
 	}
 	database := &Database{
-		name:           name,
+		Name:           name,
 		db:             db,
 		byLibrary:      make(map[string][]Migration),
 		migrationIndex: make(map[MigrationName]Migration),
 		parent:         s,
 		Options:        s.options,
-		Context:        s.context,
 		driver:         driver,
 		log:            log,
 	}
@@ -183,6 +187,22 @@ func (s *Schema) NewDatabase(log MyLogger, name string, db *sql.DB, driver Drive
 func Asynchronous() MigrationOption {
 	return func(m Migration) {
 		m.Base().async = true
+	}
+}
+
+// RepeatUntilNoOp marks a migration as potentially being needed to run multiple times.
+// It will run over and over until the database reports that the migration
+// modified no rows.  This can useuflly be combined with Asychnronous.
+//
+// This marking only applies to Script() and Generated() migrations.  The migration
+// must be a single statement.
+//
+// For Computed() migrations, do not use RepeatUntilNoOp.  Instead simply write the
+// migration use Driver.DB() to get a database handle and use it to do many little
+// transactions, each one modifying a few rows until there is no more work to do.
+func RepeatUntilNoOp() MigrationOption {
+	return func(m Migration) {
+		m.Base().repeatUntilNoOp = true
 	}
 }
 
@@ -246,16 +266,16 @@ func (d *Database) Migrations(libraryName string, migrations ...Migration) {
 		return
 	}
 	d.libraries = append(d.libraries, libraryName)
-	libList := make([]Migration, len(migrations))
+	mList := make([]Migration, len(migrations))
 	for i, migration := range migrations {
 		migration := migration.Copy()
 		migration.Base().Name.Library = libraryName
 		d.migrationIndex[migration.Base().Name] = migration
-		libList[i] = migration
+		mList[i] = migration
 		migration.Base().order = len(d.migrations)
 		d.migrations = append(d.migrations, migration)
 	}
-	d.byLibrary[libraryName] = libList
+	d.byLibrary[libraryName] = mList
 }
 
 func (m *MigrationBase) Status() MigrationStatus {
