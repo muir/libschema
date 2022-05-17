@@ -7,7 +7,7 @@ require (
 	github.com/go-sql-driver/mysql v1.6.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/kr/pretty v0.1.0 // indirect
-	github.com/lib/pq v1.10.5
+	github.com/lib/pq v1.10.6
 	github.com/muir/sqltoken v0.0.4
 	github.com/muir/testinglogur v0.0.1
 	github.com/pkg/errors v0.9.1
