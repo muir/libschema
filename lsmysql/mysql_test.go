@@ -25,7 +25,7 @@ For example:
 export PASSWORD=mysql
 docker run -d -p 3306:3306 -e MYSQL_DATABASE=libschematest -e MYSQL_ROOT_PASSWORD=$PASSWORD --restart=always --name=libschema_mysql mysql:8
 export LIBSCHEMA_MYSQL_TEST_DSN="root:${PASSWORD}@tcp(127.0.0.1:3306)/libschematest?tls=false"
-mysql --protocol=tcp -P 3306 -u root --password=$PASSWOrd --database=libschematest
+mysql --protocol=tcp -P 3306 -u root --password=$PASSWORD --database=libschematest
 
 */
 
@@ -34,7 +34,27 @@ func TestMysqlHappyPath(t *testing.T) {
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
 	}
+	testMysqlHappyPath(t, dsn, "ENGINE = InnoDB", mysqlNew, nil)
+}
 
+type MySQLInterface interface {
+	GetTableConstraint(table, column string) (string, bool, error)
+	TableHasIndex(table, indexName string) (bool, error)
+	DatabaseName() (string, error)
+	HasPrimaryKey(table string) (bool, error)
+	ColumnDefault(table, column string) (*string, error)
+	DoesColumnExist(table, column string) (bool, error)
+	UseDatabase(string)
+}
+
+type driverNew func(t *testing.T, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, MySQLInterface, error)
+
+func mysqlNew(t *testing.T, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, MySQLInterface, error) {
+	database, m, err := lsmysql.New(libschema.LogFromLog(t), name, schema, db)
+	return database, m, err
+}
+
+func testMysqlHappyPath(t *testing.T, dsn string, createPostfix string, driverNew driverNew, extraTableNames []string) {
 	t.Log("As we go, we will build a log of what has happened in array 'actions'")
 	var actions []string
 
@@ -68,14 +88,14 @@ func TestMysqlHappyPath(t *testing.T) {
 	defer cleanup(db)
 
 	s := libschema.New(context.Background(), options)
-	dbase, _, err := lsmysql.New(libschema.LogFromLog(t), "test", s, db)
+	dbase, _, err := driverNew(t, "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	defineMigrations := func(dbase *libschema.Database, extra bool) {
 		l1migrations := []libschema.Migration{
 			lsmysql.Generate("T1", func(_ context.Context, _ *sql.Tx) string {
 				actions = append(actions, "MIGRATE: L1.T1")
-				return `CREATE TABLE IF NOT EXISTS T1 (id text) ENGINE = InnoDB`
+				return `CREATE TABLE IF NOT EXISTS T1 (id text) ` + createPostfix
 			}),
 			lsmysql.Script("PT1skip", `INSERT INTO T3 T3 T3 (id) VALUES ('PT1');`,
 				libschema.SkipIf(func() (bool, error) {
@@ -89,7 +109,7 @@ func TestMysqlHappyPath(t *testing.T) {
 			lsmysql.Computed("T2", func(_ context.Context, tx *sql.Tx) error {
 				actions = append(actions, "MIGRATE: L1.T2")
 				_, err := tx.Exec(`
-					CREATE TABLE IF NOT EXISTS T2 (id text) ENGINE = InnoDB`)
+					CREATE TABLE IF NOT EXISTS T2 (id text) ` + createPostfix)
 				return err
 			}),
 			lsmysql.Generate("PT1", func(_ context.Context, _ *sql.Tx) string {
@@ -108,8 +128,8 @@ func TestMysqlHappyPath(t *testing.T) {
 				lsmysql.Generate("G1", func(_ context.Context, _ *sql.Tx) string {
 					actions = append(actions, "MIGRATE: G1")
 					return `
-						CREATE TABLE IF NOT EXISTS G1 (id text) ENGINE = InnoDB
-					`
+						CREATE TABLE IF NOT EXISTS G1 (id text) 
+					` + createPostfix
 				}),
 			)
 		}
@@ -122,7 +142,7 @@ func TestMysqlHappyPath(t *testing.T) {
 			lsmysql.Generate("T3", func(_ context.Context, _ *sql.Tx) string {
 				actions = append(actions, "MIGRATE: L2.T3")
 				return `
-					CREATE TABLE IF NOT EXISTS T3 (id text) ENGINE = InnoDB`
+					CREATE TABLE IF NOT EXISTS T3 (id text) ` + createPostfix
 			}),
 			lsmysql.Script("T4pre1", `
 					INSERT INTO T1 (id) VALUES ('T4');`),
@@ -133,7 +153,7 @@ func TestMysqlHappyPath(t *testing.T) {
 			lsmysql.Generate("T4", func(_ context.Context, _ *sql.Tx) string {
 				actions = append(actions, "MIGRATE: L2.T4")
 				return `
-					CREATE TABLE IF NOT EXISTS T4 (id text) ENGINE = InnoDB`
+					CREATE TABLE IF NOT EXISTS T4 (id text) ` + createPostfix
 			}),
 		)
 	}
@@ -170,11 +190,12 @@ func TestMysqlHappyPath(t *testing.T) {
 		assert.NoError(t, rows.Scan(&name))
 		names = append(names, name)
 	}
-	assert.Equal(t, []string{"T1", "T2", "T3", "T4", "tracking_table"}, names, "table names")
+	expectedTableNames := append([]string{"T1", "T2", "T3", "T4", "tracking_table"}, extraTableNames...)
+	assert.Equal(t, expectedTableNames, names, "table names")
 
 	t.Log("now we will start a new set of migrations, starting by reading the migration state")
 	s = libschema.New(context.Background(), options)
-	dbase, _, err = lsmysql.New(libschema.LogFromLog(t), "test", s, db)
+	dbase, _, err = driverNew(t, "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase, 2nd time")
 
 	t.Log("Now we define slightly more migrations")
@@ -198,6 +219,10 @@ func TestMysqlNotAllowed(t *testing.T) {
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
 	}
+	testMysqlNotAllowed(t, dsn, "ENGINE = InnoDB", mysqlNew)
+}
+
+func testMysqlNotAllowed(t *testing.T, dsn string, createPostfix string, driverNew driverNew) {
 
 	cases := []struct {
 		name      string
@@ -205,13 +230,16 @@ func TestMysqlNotAllowed(t *testing.T) {
 		errorText string
 	}{
 		{
-			name:      "combines",
-			migration: `CREATE TABLE T1 (id text) ENGINE=InnoDB; INSERT INTO T1 (id) VALUES ('x');`,
+			name: "combines",
+			migration: `
+				CREATE TABLE T1 (id text) ` + createPostfix + `;
+				INSERT INTO T1 (id) VALUES ('x');
+				`,
 			errorText: "Migration combines DDL",
 		},
 		{
 			name:      "unconditional",
-			migration: `CREATE TABLE T1 (id text) ENGINE=InnoDB`,
+			migration: `CREATE TABLE T1 (id text) ` + createPostfix,
 			errorText: "Unconditional migration has non-idempotent",
 		},
 	}
@@ -226,7 +254,7 @@ func TestMysqlNotAllowed(t *testing.T) {
 		defer db.Close()
 		defer cleanup(db)
 
-		dbase, _, err := lsmysql.New(libschema.LogFromLog(t), "test", s, db)
+		dbase, _, err := driverNew(t, "test", s, db)
 		require.NoError(t, err, "libschema NewDatabase")
 
 		dbase.Migrations("L1", lsmysql.Script("x", tc.migration))

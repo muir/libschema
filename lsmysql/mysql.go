@@ -1,3 +1,4 @@
+// Package lsmysql has a libschema.Driver support MySQL
 package lsmysql
 
 import (
@@ -6,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"
@@ -18,6 +20,8 @@ import (
 // * CANNOT do DDL commands inside transactions
 // * Support UPSERT using INSERT ... ON DUPLICATE KEY UPDATE
 // * uses /* -- and # for comments
+// * supports advisory locks
+// * has quoting modes (ANSI_QUOTES)
 //
 // Because mysql DDL commands cause transactions to autocommit, tracking the schema changes in
 // a secondary table (like libschema does) is inherently unsafe.  The MySQL driver will
@@ -36,18 +40,42 @@ import (
 // be propagated into the MySQL object and be used as a default table for all of the
 // functions to interrogate data defintion status.
 type MySQL struct {
-	lockTx       *sql.Tx
-	lockStr      string
-	db           *sql.DB
-	databaseName string // used in skip.go only
+	lockTx              *sql.Tx
+	lockStr             string
+	db                  *sql.DB
+	databaseName        string // used in skip.go only
+	lock                sync.Mutex
+	trackingSchemaTable func(*libschema.Database) (string, string, error)
+	skipDatabase        bool
+}
+
+type MySQLOpt func(*MySQL)
+
+// WithoutDatabase skips creating a *libschema.Database.  Without it,
+// functions for getting and setting the dbNames are required.
+func WithoutDatabase(p *MySQL) {
+	p.skipDatabase = true
 }
 
 // New creates a libschema.Database with a mysql driver built in.
-func New(log *internal.Log, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, *MySQL, error) {
-	m := &MySQL{db: db}
-	d, err := schema.NewDatabase(log, name, db, m)
-	m.databaseName = d.Options.SchemaOverride
-	return d, m, err
+func New(log *internal.Log, name string, schema *libschema.Schema, db *sql.DB, options ...MySQLOpt) (*libschema.Database, *MySQL, error) {
+	m := &MySQL{
+		db:                  db,
+		trackingSchemaTable: trackingSchemaTable,
+	}
+	for _, opt := range options {
+		opt(m)
+	}
+	var d *libschema.Database
+	if !m.skipDatabase {
+		var err error
+		d, err = schema.NewDatabase(log, name, db, m)
+		if err != nil {
+			return nil, nil, err
+		}
+		m.databaseName = d.Options.SchemaOverride
+	}
+	return d, m, nil
 }
 
 type mmigration struct {
@@ -115,7 +143,9 @@ func (m mmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migrat
 }
 
 // DoOneMigration applies a single migration.
-// It is expected to be called by libschema.
+// It is expected to be called by libschema and is not
+// called internally which means that is safe to override
+// in types that embed MySQL.
 func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (result sql.Result, err error) {
 	// TODO: DRY
 	defer func() {
@@ -185,9 +215,11 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 }
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
-// It is expected to be called by libschema.
+// It is expected to be called by libschema and is not
+// called internally which means that is safe to override
+// in types that embed MySQL.
 func (p *MySQL) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Log, d *libschema.Database) error {
-	schema, tableName, err := trackingSchemaTable(d)
+	schema, tableName, err := p.trackingSchemaTable(d)
 	if err != nil {
 		return err
 	}
@@ -215,6 +247,12 @@ func (p *MySQL) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Lo
 }
 
 var simpleIdentifierRE = regexp.MustCompile(`\A[A-Za-z][A-Za-z0-9_]*\z`)
+
+func WithTrackingTableQuoter(f func(*libschema.Database) (schemaName string, tableName string, err error)) MySQLOpt {
+	return func(p *MySQL) {
+		p.trackingSchemaTable = f
+	}
+}
 
 // When MySQL is in ANSI_QUOTES mode, it allows "table_name" quotes but when
 // it is not then it does not.  There is no prefect option: in ANSI_QUOTES
@@ -247,9 +285,8 @@ func trackingSchemaTable(d *libschema.Database) (string, string, error) {
 
 // trackingTable returns the schema+table reference for the migration tracking table.
 // The name is already quoted properly for use as a save mysql identifier.
-// TODO: DRY
-func trackingTable(d *libschema.Database) string {
-	_, table, _ := trackingSchemaTable(d)
+func (p *MySQL) trackingTable(d *libschema.Database) string {
+	_, table, _ := p.trackingSchemaTable(d)
 	return table
 }
 
@@ -265,7 +302,7 @@ func (p *MySQL) saveStatus(log *internal.Log, tx *sql.Tx, d *libschema.Database,
 	})
 	q := fmt.Sprintf(`
 		REPLACE INTO %s (library, migration, done, error, updated_at)
-		VALUES (?, ?, ?, ?, now())`, trackingTable(d))
+		VALUES (?, ?, ?, ?, now())`, p.trackingTable(d))
 	_, err := tx.Exec(q, m.Base().Name.Library, m.Base().Name.Name, done, estr)
 	if err != nil {
 		return errors.Wrapf(err, "Save status for %s", m.Base().Name)
@@ -275,13 +312,20 @@ func (p *MySQL) saveStatus(log *internal.Log, tx *sql.Tx, d *libschema.Database,
 
 // LockMigrationsTable locks the migration tracking table for exclusive use by the
 // migrations running now.
-// It is expected to be called by libschema.
+//
+// It is expected to be called by libschema and is not
+// called internally which means that is safe to override
+// in types that embed MySQL.
+//
 // In MySQL, locks are _not_ tied to transactions so closing the transaction
 // does not release the lock.  We'll use a transaction just to make sure that
 // we're using the same connection.  If LockMigrationsTable succeeds, be sure to
 // call UnlockMigrationsTable.
 func (p *MySQL) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *libschema.Database) error {
-	_, tableName, err := trackingSchemaTable(d)
+	// LockMigrationsTable is overridden for SingleStore
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	_, tableName, err := p.trackingSchemaTable(d)
 	if err != nil {
 		return err
 	}
@@ -303,8 +347,14 @@ func (p *MySQL) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *lib
 }
 
 // UnlockMigrationsTable unlocks the migration tracking table.
-// It is expected to be called by libschema.
+//
+// It is expected to be called by libschema and is not
+// called internally which means that is safe to override
+// in types that embed MySQL.
 func (p *MySQL) UnlockMigrationsTable(_ *internal.Log) error {
+	// UnlockMigrationsTable is overridden for SingleStore
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	if p.lockTx == nil {
 		return errors.Errorf("libschema migrations table, not locked")
 	}
@@ -320,10 +370,13 @@ func (p *MySQL) UnlockMigrationsTable(_ *internal.Log) error {
 }
 
 // LoadStatus loads the current status of all migrations from the migration tracking table.
-// It is expected to be called by libschema.
+//
+// It is expected to be called by libschema and is not
+// called internally which means that is safe to override
+// in types that embed MySQL.
 func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Database) ([]libschema.MigrationName, error) {
 	// TODO: DRY
-	tableName := trackingTable(d)
+	tableName := p.trackingTable(d)
 	rows, err := d.DB().QueryContext(ctx, fmt.Sprintf(`
 		SELECT	library, migration, done
 		FROM	%s`, tableName))
@@ -352,7 +405,10 @@ func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Da
 
 // IsMigrationSupported checks to see if a migration is well-formed.  Absent a code change, this
 // should always return nil.
-// It is expected to be called by libschema.
+//
+// It is expected to be called by libschema and is not
+// called internally which means that is safe to override
+// in types that embed MySQL.
 func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ *internal.Log, migration libschema.Migration) error {
 	m, ok := migration.(*mmigration)
 	if !ok {
