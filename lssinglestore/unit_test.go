@@ -8,10 +8,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestVarious(t *testing.T) {
+func TestAsString(t *testing.T) {
 	assert.Equal(t, "", asString(nil), "asString nil")
+}
 
-	ttcases := []struct {
+func TestTrackingSchemaTable(t *testing.T) {
+	cases := []struct {
 		tt     string
 		err    bool
 		schema string
@@ -23,13 +25,26 @@ func TestVarious(t *testing.T) {
 			table:  "`foo`.`xk-z`",
 		},
 		{
-			tt:     "`foo.xk-z",
+			tt:  "`foo.xk-z",
+			err: true,
+		},
+		{
+			tt:     "foo",
+			schema: "",
+			table:  "foo",
+		},
+		{
+			tt:  "x.y.z",
+			err: true,
+		},
+		{
+			tt:  "`x",
 			err: true,
 		},
 	}
 
-	for _, tc := range ttcases {
-		t.Run("tt-"+tc.tt, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.tt, func(t *testing.T) {
 			d := &libschema.Database{
 				Options: libschema.Options{
 					TrackingTable: tc.tt,
