@@ -183,9 +183,9 @@ be given their own hook.
 
 Like database/sql, libschema requires database-specific drivers:
 
-- PostgreSQL support is in "github.com/muir/libschema/lspostgres" 
-- MySQL support in "github.com/muir/libschema/lsmysql" 
-- SingleStore support "github.com/muir/libschema/lssinglestore" 
+- PostgreSQL support is in `"github.com/muir/libschema/lspostgres"`
+- MySQL support in `"github.com/muir/libschema/lsmysql"`
+- SingleStore support `"github.com/muir/libschema/lssinglestore"`
 
 libschema currently supports: PostgreSQL, SingleStore, MySQL.
 It is relatively easy to add additional databases.
@@ -224,8 +224,9 @@ The simplist pattern is to deploy migrations synchronously when
 rolling out updates.  If you take your service down to do deploys
 then your migrations do not have to be backwards compatible.  This
 has the huge upside of allowing your schema to eveolve easily and
-avoid the build up to technical debt.  For example, if you have a
-column whose name is sub-optimal, you can simply rename it.
+avoid the build up of technical debt.  For example, if you have a
+column whose name is sub-optimal, you can simply rename it and 
+change the code that uses it at the same time.
 
 To minimimize downtime so that the downtime doesn't matter in
 practice, run expensive migrations asynchronously.  Asychronous
@@ -236,7 +237,7 @@ decorator may be useful.
 ### Green-Blue deploys
 
 When you decide to run without downtime, one consequence is that
-all migrations must be backewards compatible with the deployed
+all migrations must be backwards compatible with the deployed
 code.
 
 DDL operations that are backwards compatible include:
@@ -249,16 +250,22 @@ DDL operations that are backwards compatible include:
 
 From a coding point-of-view, the simplest way to manage developing
 with these restrictions is to separate the migration into a separate
-code change.  Any code that might be broken by the migration should
-be tested with the same code change.  No other changes to code
-should be allowed in the same code change.  Local and CI testing
+pull request from any other code changes.  Tests must still pass in
+the pull request that just has the migration. Local and CI testing
 should apply the migration and validate that the the existing code
 isn't broken by the change in database schema.
 
 Only after the migration has been deployed can code that uses the 
 migration be deployed.  When using git, this can be done by having
 layered side branches: 
-main -> migration branch -> code branch -> cleanup migration branch.
+
+```mermaid
+graph LR;
+ mob(migration-only branch)
+ code(code branch)
+ cleanup(cleanup migration branch)
+ main --> mob --> code --> cleanup;
+```
 
 ### Kubernetes and slow migrations
 
