@@ -1,0 +1,53 @@
+name: SingleStore tests
+on: [ push ]
+
+jobs:
+  Test-mysql-integration:
+    runs-on: ubuntu-latest
+
+    environment: singlestore
+
+    services:
+      singlestoredb:
+        image: ghcr.io/singlestore-labs/singlestoredb-dev
+        ports:
+          - 3306:3306
+          - 8080:8080
+          - 9000:9000
+        env:
+          ROOT_PASSWORD: test
+          SINGLESTORE_LICENSE: ${{ secrets.SINGLESTORE_LICENSE }}
+
+    steps:
+      - name: sanity check using mysql client
+        run: |
+          mysql -u root -ptest -e "CREATE DATABASE libschematest" -h 127.0.0.1
+
+      - name: Check out repository code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Test
+        env:
+          LIBSCHEMA_SINGLESTORE_TEST_DSN: "root:test@tcp(127.0.0.1:3306)/libschematest?tls=false"
+        run: go test ./lsmysql/... ./lssinglestore/... -v
+
+      - name: Run Coverage
+        env:
+          LIBSCHEMA_SINGLESTORE_TEST_DSN: "root:test@tcp(127.0.0.1:3306)/libschematest?tls=false"
+        run: go test -coverprofile=coverage.txt -covermode=atomic -coverpkg=github.com/muir/libschema/... ./lsmysql/... ./lssinglestore/...  
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2
+        with:
+          verbose: true
+          flags: singlestore_tests
+          fail_ci_if_error: true
+

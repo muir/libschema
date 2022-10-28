@@ -1,5 +1,5 @@
 
-# libschema - schema migration for libraries
+# libschema - database schema migration for libraries
 
 [![GoDoc](https://godoc.org/github.com/muir/libschema?status.png)](https://pkg.go.dev/github.com/muir/libschema)
 ![unit tests](https://github.com/muir/libschema/actions/workflows/go.yml/badge.svg)
@@ -17,7 +17,7 @@ Install:
 
 ## Libraries
 
-Libschema provides a way for Go libraries to manage their own migrations.
+Libschema provides a way for Go libraries to manage their own database migrations.
 
 Trying migrations to libraries supports two things: the first is
 source code locality: the migrations can be next to the code that
@@ -123,7 +123,7 @@ database.Migrations("users",
 				ADD COLUMN org TEXT,
 				ADD ADD CONSTRAINT orgfk FOREIGN KEY (org)
 					REFERENCES org (name) `, 
-	libschema.After("orgs", "createOrgTable")),
+		libschema.After("orgs", "createOrgTable")),
 )
 
 database.Migrations("orgs",
@@ -180,11 +180,14 @@ be given their own hook.
 
 ## Driver inclusion and database support
 
-Like database/sql, libschema requires database-specific drivers.
-Include "github.com/muir/libschema/lspostgres" for Postgres support
-and "github.com/muir/libschema/lsmysql" for Mysql support.
+Like database/sql, libschema requires database-specific drivers:
 
-libschema currently supports: PostgreSQL, MySQL.  It is relatively easy to add additional databases.
+- PostgreSQL support is in "github.com/muir/libschema/lspostgres" 
+- MySQL support in "github.com/muir/libschema/lsmysql" 
+- SingleStore support "github.com/muir/libschema/lssinglestore" 
+
+libschema currently supports: PostgreSQL, SingleStore, MySQL.
+It is relatively easy to add additional databases.
 
 ## Forward only
 

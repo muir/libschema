@@ -1,3 +1,4 @@
+// Package lspostgres has a libschema.Driver support PostgreSQL
 package lspostgres
 
 import (
