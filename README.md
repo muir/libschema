@@ -42,7 +42,7 @@ database, err := lspostgres.New(logger, "main-db", schema, sqlDB)
 
 database.Migrations("MyLibrary",
 	lspostgres.Script("createUserTable", `
-		CREATE TAGLE users (
+		CREATE TABLE users (
 			name	text,
 			id	bigint
 		)`
