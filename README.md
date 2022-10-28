@@ -4,7 +4,8 @@
 [![GoDoc](https://godoc.org/github.com/muir/libschema?status.png)](https://pkg.go.dev/github.com/muir/libschema)
 ![unit tests](https://github.com/muir/libschema/actions/workflows/go.yml/badge.svg)
 ![pg tests](https://github.com/muir/libschema/actions/workflows/pg.yml/badge.svg)
-![pg tests](https://github.com/muir/libschema/actions/workflows/mysql.yml/badge.svg)
+![mysql tests](https://github.com/muir/libschema/actions/workflows/mysql.yml/badge.svg)
+![singlestore tests](https://github.com/muir/libschema/actions/workflows/s2.yml/badge.svg)
 [![report card](https://goreportcard.com/badge/github.com/muir/libschema)](https://goreportcard.com/report/github.com/muir/libschema)
 [![codecov](https://codecov.io/gh/muir/libschema/branch/main/graph/badge.svg)](https://codecov.io/gh/muir/libschema)
 
