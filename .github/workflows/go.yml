@@ -1,5 +1,8 @@
 on: [ push ]
 name: Go tests
+permissions:  # added using https://github.com/step-security/secure-workflows
+  contents: read
+
 jobs:
   Build-and-test:
     strategy:
@@ -8,10 +11,15 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v2
+    - name: Harden Runner
+      uses: step-security/harden-runner@2e205a28d0e1da00c5f53b161f4067b052c61f34
+      with:
+        egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
+
+    - uses: actions/checkout@e2f20e631ae6d7dd3b768f56a5d2af784dd54791
 
     - name: Set up Go
-      uses: actions/setup-go@v2
+      uses: actions/setup-go@bfdd3570ce990073878bf10f6b2d79082de49492
       with:
         go-version: ${{ matrix.go-version }}
 
