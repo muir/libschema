@@ -9,7 +9,6 @@
 [![report card](https://goreportcard.com/badge/github.com/muir/libschema)](https://goreportcard.com/report/github.com/muir/libschema)
 [![codecov](https://codecov.io/gh/muir/libschema/branch/main/graph/badge.svg)](https://codecov.io/gh/muir/libschema)
 
-
 Install:
 
 	go get github.com/muir/libschema
