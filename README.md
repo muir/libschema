@@ -8,6 +8,9 @@
 ![singlestore tests](https://github.com/muir/libschema/actions/workflows/s2.yml/badge.svg)
 [![report card](https://goreportcard.com/badge/github.com/muir/libschema)](https://goreportcard.com/report/github.com/muir/libschema)
 [![codecov](https://codecov.io/gh/muir/libschema/branch/main/graph/badge.svg)](https://codecov.io/gh/muir/libschema)
+[![OpenSSF Scorecard]
+(https://api.securityscorecards.dev/projects/github.com/{org}/{repo}/badge)]
+(https://api.securityscorecards.dev/projects/github.com/{org}/{repo})
 
 
 Install:
