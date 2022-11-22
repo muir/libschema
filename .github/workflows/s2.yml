@@ -5,7 +5,7 @@ permissions:  # added using https://github.com/step-security/secure-workflows
   contents: read
 
 jobs:
-  Test-mysql-integration:
+  Test-Singlestore-integration:
     runs-on: ubuntu-latest
 
     environment: singlestore
