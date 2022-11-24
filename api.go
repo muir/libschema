@@ -106,7 +106,7 @@ type Options struct {
 	Overrides *OverrideOptions
 
 	// TrackingTable is the name of the table used to track which migrations
-	// have been applied
+	// have been applied.  If not set, DefaultTrackingTable will be used.
 	TrackingTable string
 
 	// SchemaOverride is used to override the default schema.  This is most useful
@@ -116,6 +116,9 @@ type Options struct {
 	// These TxOptions will be used for all migration transactions.
 	MigrationTxOptions *sql.TxOptions
 
+	// When ErrorOnUnknownMigrations is true, a migration that is found in the
+	// tracking table that does not correspond to any defined migrations is an
+	// error.
 	ErrorOnUnknownMigrations bool
 
 	// OnMigrationFailure is only called when there is a failure
