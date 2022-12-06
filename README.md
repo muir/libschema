@@ -33,7 +33,7 @@ schema.  Libschema hopes to start solving this problem.
 Migrations are registered:
 
 ```go
-schema := libschema.NewSchema(ctx, libschema.Options{})
+schema := libschema.New(ctx, libschema.Options{})
 
 sqlDB, err := sql.Open("postgres", "....")
 
