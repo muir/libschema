@@ -221,6 +221,9 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 		})
 	}
 	if err := d.driver.IsMigrationSupported(d, d.log, m); err != nil {
+		d.log.Debug(" migration not supported", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return false, err
 	}
 	if m.Base().skipIf != nil {
@@ -229,7 +232,10 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			return false, errors.Wrapf(err, "SkipIf %s", m.Base().Name)
 		}
 		if skip {
+			d.log.Debug(" skipping migration")
 			return false, nil
+		} else {
+			d.log.Debug(" not skipping migration")
 		}
 	}
 	if m.Base().skipRemainingIf != nil {
@@ -238,13 +244,18 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			return false, errors.Wrapf(err, "SkipRemainingIf %s", m.Base().Name)
 		}
 		if skip {
+			d.log.Debug(" skipping remaining migrations")
 			return true, nil
 		}
+		d.log.Debug(" not skipping remaining migrations")
 	}
 	var repeatCount int
 	for {
 		result, err := d.driver.DoOneMigration(ctx, d.log, d, m)
 		if err != nil && d.Options.OnMigrationFailure != nil {
+			d.log.Debug(" migration failed", map[string]interface{}{
+				"error": err.Error(),
+			})
 			d.Options.OnMigrationFailure(d, m.Base().Name, err)
 		}
 		if m.Base().repeatUntilNoOp && err == nil && result != nil {
