@@ -178,14 +178,11 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 	pm := m.(*mmigration)
 	if pm.script != nil {
 		script := pm.script(ctx, tx)
-		switch CheckScript(script) {
-		case Safe:
-		case DataAndDDL:
-			err = errors.New("Migration combines DDL (Data Definition Language [schema changes]) and data manipulation")
-		case NonIdempotentDDL:
-			if !m.Base().HasSkipIf() {
-				err = errors.New("Unconditional migration has non-idempotent DDL (Data Definition Language [schema changes])")
-			}
+		err = CheckScript(script)
+		if errors.Is(err, ErrNonIdempotentDDL) && m.Base().HasSkipIf() {
+			// We assume the skip checks to see if the non-idempotent migration
+			// should be applied
+			err = nil
 		}
 		if err == nil {
 			result, err = tx.Exec(script)
