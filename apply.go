@@ -234,9 +234,8 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 		if skip {
 			d.log.Debug(" skipping migration")
 			return false, nil
-		} else {
-			d.log.Debug(" not skipping migration")
 		}
+		d.log.Debug(" not skipping migration")
 	}
 	if m.Base().skipRemainingIf != nil {
 		skip, err := m.Base().skipRemainingIf()
