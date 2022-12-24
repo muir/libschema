@@ -44,7 +44,7 @@ func CheckScript(s string) error {
 		return fmt.Errorf("data command '%s' combined with DDL command '%s': %w", seenData, seenDDL, ErrDataAndDDL)
 	}
 	if nonIdempotent != "" {
-		return fmt.Errorf("non-idempotent DSL '%s': %w", nonIdempotent, ErrNonIdempotentDDL)
+		return fmt.Errorf("non-idempotent DDL '%s': %w", nonIdempotent, ErrNonIdempotentDDL)
 	}
 	return nil
 }

@@ -57,8 +57,11 @@ func WithoutDatabase(p *MySQL) {
 	p.skipDatabase = true
 }
 
-// New creates a libschema.Database with a mysql driver built in.
-func New(log *internal.Log, name string, schema *libschema.Schema, db *sql.DB, options ...MySQLOpt) (*libschema.Database, *MySQL, error) {
+// New creates a libschema.Database with a mysql driver built in.  The dbName
+// parameter specifies the name of the database, but that name is not actaully
+// used anywhere except for logging.  To override the database used for the
+// migrations set the SchemaOverride option.
+func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB, options ...MySQLOpt) (*libschema.Database, *MySQL, error) {
 	m := &MySQL{
 		db:                  db,
 		trackingSchemaTable: trackingSchemaTable,
@@ -69,7 +72,7 @@ func New(log *internal.Log, name string, schema *libschema.Schema, db *sql.DB, o
 	var d *libschema.Database
 	if !m.skipDatabase {
 		var err error
-		d, err = schema.NewDatabase(log, name, db, m)
+		d, err = schema.NewDatabase(log, dbName, db, m)
 		if err != nil {
 			return nil, nil, err
 		}

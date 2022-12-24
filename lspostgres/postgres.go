@@ -22,9 +22,11 @@ type Postgres struct {
 	lockTx *sql.Tx
 }
 
-// New creates a libschema.Database with a postgres driver built in.
-func New(log *internal.Log, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, error) {
-	return schema.NewDatabase(log, name, db, &Postgres{})
+// New creates a libschema.Database with a postgres driver built in.  The dbName
+// parameter is used internally by libschema, but does not affect where migrations
+// are actually applied.
+func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, error) {
+	return schema.NewDatabase(log, dbName, db, &Postgres{})
 }
 
 type pmigration struct {
