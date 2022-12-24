@@ -85,7 +85,7 @@ type Database struct {
 	migrationIndex    map[MigrationName]Migration
 	errors            []error
 	db                *sql.DB
-	Name              string
+	DBName            string
 	driver            Driver
 	sequence          []Migration // in order of execution
 	status            map[MigrationName]*MigrationStatus
@@ -162,12 +162,12 @@ func New(ctx context.Context, options Options) *Schema {
 
 // NewDatabase creates a Database object.  For Postgres and Mysql this is bundled into
 // lspostgres.New() and lsmysql.New().
-func (s *Schema) NewDatabase(log *internal.Log, name string, db *sql.DB, driver Driver) (*Database, error) {
-	if _, ok := s.databases[name]; ok {
-		return nil, errors.Errorf("Duplicate database '%s'", name)
+func (s *Schema) NewDatabase(log *internal.Log, dbName string, db *sql.DB, driver Driver) (*Database, error) {
+	if _, ok := s.databases[dbName]; ok {
+		return nil, errors.Errorf("Duplicate database '%s'", dbName)
 	}
 	database := &Database{
-		Name:           name,
+		DBName:         dbName,
 		db:             db,
 		byLibrary:      make(map[string][]Migration),
 		migrationIndex: make(map[MigrationName]Migration),
@@ -176,7 +176,7 @@ func (s *Schema) NewDatabase(log *internal.Log, name string, db *sql.DB, driver 
 		driver:         driver,
 		log:            log,
 	}
-	s.databases[name] = database
+	s.databases[dbName] = database
 	s.databaseOrder = append(s.databaseOrder, database)
 	return database, nil
 }

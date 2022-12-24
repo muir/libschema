@@ -67,7 +67,7 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 				}
 			}()
 			if s.options.Overrides.ErrorIfMigrateNeeded && !d.done(s) {
-				return errors.Errorf("Migrations required for %s", d.Name)
+				return errors.Errorf("Migrations required for %s", d.DBName)
 			}
 			return d.migrate(ctx, s)
 		}(d)
@@ -108,7 +108,7 @@ func (d *Database) prepare(ctx context.Context) error {
 		d.sequence[i] = m
 		if d.Options.DebugLogging {
 			d.log.Debug("Migration sequence", map[string]interface{}{
-				"database": d.Name,
+				"database": d.DBName,
 				"library":  m.Base().Name.Library,
 				"name":     m.Base().Name.Name,
 			})
@@ -163,7 +163,7 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 
 	if d.done(s) {
 		d.log.Info("No migrations needed", map[string]interface{}{
-			"database": d.Name,
+			"database": d.DBName,
 		})
 		return nil
 	}
@@ -173,7 +173,7 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 	}
 
 	d.log.Info("Starting migrations", map[string]interface{}{
-		"database": d.Name,
+		"database": d.DBName,
 	})
 
 	lastUnfishedSyncronous := d.lastUnfinishedSynchrnous()
@@ -182,7 +182,7 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 		if m.Base().Status().Done {
 			if d.Options.DebugLogging {
 				d.log.Trace("Migration already done", map[string]interface{}{
-					"database": d.Name,
+					"database": d.DBName,
 					"library":  m.Base().Name.Library,
 					"name":     m.Base().Name.Name,
 				})
@@ -193,7 +193,7 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 		if m.Base().async && i > lastUnfishedSyncronous && !s.options.Overrides.EverythingSynchronous {
 			// This and all following migrations are async
 			d.log.Info("The remaining migrations are async starting from", map[string]interface{}{
-				"database": d.Name,
+				"database": d.DBName,
 				"library":  m.Base().Name.Library,
 				"name":     m.Base().Name.Name,
 			})
@@ -215,7 +215,7 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error) {
 	if d.Options.DebugLogging {
 		d.log.Debug("Starting migration", map[string]interface{}{
-			"database": d.Name,
+			"database": d.DBName,
 			"library":  m.Base().Name.Library,
 			"name":     m.Base().Name.Name,
 		})
@@ -301,11 +301,11 @@ func (d *Database) allDone(m Migration, err error) {
 	}
 	if err == nil {
 		d.log.Info("Migrations complete", map[string]interface{}{
-			"database": d.Name,
+			"database": d.DBName,
 		})
 	} else {
 		d.log.Info("Migrations failed", map[string]interface{}{
-			"database": d.Name,
+			"database": d.DBName,
 			"error":    err,
 		})
 	}

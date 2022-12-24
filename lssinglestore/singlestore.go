@@ -1,3 +1,4 @@
+// Package lssinglestore is a libschema.Driver for connecting to SingleStore databases.
 package lssinglestore
 
 import (
@@ -41,8 +42,8 @@ type SingleStore struct {
 }
 
 // New creates a libschema.Database with a Singlestore driver built in.
-func New(log *internal.Log, name string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, *SingleStore, error) {
-	_, mysql, err := lsmysql.New(log, name, schema, db,
+func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, *SingleStore, error) {
+	_, mysql, err := lsmysql.New(log, dbName, schema, db,
 		lsmysql.WithoutDatabase,
 		lsmysql.WithTrackingTableQuoter(trackingSchemaTable),
 	)
@@ -53,7 +54,7 @@ func New(log *internal.Log, name string, schema *libschema.Schema, db *sql.DB) (
 		MySQL: mysql,
 		db:    db,
 	}
-	database, err := schema.NewDatabase(log, name, db, s2)
+	database, err := schema.NewDatabase(log, dbName, db, s2)
 	if err != nil {
 		return nil, nil, err
 	}
