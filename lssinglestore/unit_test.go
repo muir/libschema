@@ -17,12 +17,14 @@ func TestTrackingSchemaTable(t *testing.T) {
 		tt     string
 		err    bool
 		schema string
+		simple string
 		table  string
 	}{
 		{
 			tt:     "`foo`.xk-z",
 			schema: "`foo`",
 			table:  "`foo`.`xk-z`",
+			simple: "`xk-z`",
 		},
 		{
 			tt:  "`foo.xk-z",
@@ -32,6 +34,7 @@ func TestTrackingSchemaTable(t *testing.T) {
 			tt:     "foo",
 			schema: "",
 			table:  "foo",
+			simple: "foo",
 		},
 		{
 			tt:  "x.y.z",
@@ -50,13 +53,14 @@ func TestTrackingSchemaTable(t *testing.T) {
 					TrackingTable: tc.tt,
 				},
 			}
-			schema, table, err := trackingSchemaTable(d)
+			schema, table, simple, err := trackingSchemaTable(d)
 			if tc.err {
 				assert.Error(t, err)
 			} else {
 				if assert.NoError(t, err) {
 					assert.Equal(t, tc.schema, schema, "schema")
 					assert.Equal(t, tc.table, table, "table")
+					assert.Equal(t, tc.simple, simple, "simpleTable")
 				}
 			}
 		})

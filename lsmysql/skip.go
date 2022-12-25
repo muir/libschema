@@ -43,6 +43,25 @@ func (p *MySQL) HasPrimaryKey(table string) (bool, error) {
 	return count != 0, errors.Wrapf(err, "has primary key %s.%s", database, table)
 }
 
+// ColumnIsInPrimaryKey returns true if the column part of the prmary key.
+// The table is assumed to be in the current database unless m.UseDatabase() has been called.
+func (p *MySQL) ColumnIsInPrimaryKey(table string, column string) (bool, error) {
+	database, err := p.DatabaseName()
+	if err != nil {
+		return false, err
+	}
+	var count int
+	err = p.db.QueryRow(`
+		SELECT	COUNT(*)
+		FROM	information_schema.columns
+		WHERE	table_schema = ?
+		AND	table_name = ?
+		AND	column_name = ?
+		AND	column_key = 'PRI'`,
+		database, table, column).Scan(&count)
+	return count != 0, errors.Wrapf(err, "column is in primary key %s.%s.%s", database, table, column)
+}
+
 // TableHasIndex returns true if there is an index matching the
 // name given.
 // The table is assumed to be in the current database unless m.UseDatabase() has been called.
