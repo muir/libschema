@@ -249,6 +249,9 @@ func (p *MySQL) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Lo
 
 var simpleIdentifierRE = regexp.MustCompile(`\A[A-Za-z][A-Za-z0-9_]*\z`)
 
+// WithTrackingTableQuoter is a somewhat internal function -- used by lssinglestore.
+// It replaces the private function that takes apart the name of the tracking
+// table and provides the components.
 func WithTrackingTableQuoter(f func(*libschema.Database) (schemaName, tableName, simpleTableName string, err error)) MySQLOpt {
 	return func(p *MySQL) {
 		p.trackingSchemaTable = f
