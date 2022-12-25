@@ -95,7 +95,7 @@ func (p *SingleStore) LockMigrationsTable(ctx context.Context, _ *internal.Log, 
 	if p.lockTx != nil {
 		return errors.Errorf("migrations already locked")
 	}
-	_, tableName, err := trackingSchemaTable(d)
+	_, tableName, _, err := trackingSchemaTable(d)
 	if err != nil {
 		return err
 	}
@@ -152,34 +152,34 @@ func makeID(raw string) (string, error) {
 	}
 }
 
-func trackingSchemaTable(d *libschema.Database) (string, string, error) {
+func trackingSchemaTable(d *libschema.Database) (string, string, string, error) {
 	tableName := d.Options.TrackingTable
 	s := strings.Split(tableName, ".")
 	switch len(s) {
 	case 2:
 		schema, err := makeID(s[0])
 		if err != nil {
-			return "", "", errors.Wrap(err, "cannot make tracking table schema name")
+			return "", "", "", errors.Wrap(err, "cannot make tracking table schema name")
 		}
 		table, err := makeID(s[1])
 		if err != nil {
-			return "", "", errors.Wrap(err, "cannot make tracking table table name")
+			return "", "", "", errors.Wrap(err, "cannot make tracking table table name")
 		}
-		return schema, schema + "." + table, nil
+		return schema, schema + "." + table, table, nil
 	case 1:
 		table, err := makeID(tableName)
 		if err != nil {
-			return "", "", errors.Wrap(err, "cannot make tracking table table name")
+			return "", "", "", errors.Wrap(err, "cannot make tracking table table name")
 		}
-		return "", table, nil
+		return "", table, table, nil
 	default:
-		return "", "", errors.Errorf("tracking table '%s' is not valid", tableName)
+		return "", "", "", errors.Errorf("tracking table '%s' is not valid", tableName)
 	}
 }
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
 func (p *SingleStore) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Log, d *libschema.Database) error {
-	schema, tableName, err := trackingSchemaTable(d)
+	schema, tableName, _, err := trackingSchemaTable(d)
 	if err != nil {
 		return err
 	}
@@ -193,6 +193,7 @@ func (p *SingleStore) CreateSchemaTableIfNotExists(ctx context.Context, _ *inter
 	}
 	_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
+			db_name		varchar(255) NOT NULL,
 			library		varchar(255) NOT NULL,
 			migration	varchar(255) NOT NULL,
 			done		boolean NOT NULL,
@@ -200,7 +201,7 @@ func (p *SingleStore) CreateSchemaTableIfNotExists(ctx context.Context, _ *inter
 			updated_at	timestamp DEFAULT now(),
 			SORT KEY	(library, migration),
 			SHARD KEY	(library, migration),
-			PRIMARY KEY	(library, migration)
+			PRIMARY KEY	(db_name, library, migration)
 		)`, tableName))
 	if err != nil {
 		return errors.Wrapf(err, "Could not create libschema migrations table '%s'", tableName)
