@@ -3,7 +3,7 @@ module github.com/muir/libschema
 go 1.16
 
 require (
-	github.com/go-sql-driver/mysql v1.7.0
+	github.com/go-sql-driver/mysql v1.7.1
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/lib/pq v1.10.8
