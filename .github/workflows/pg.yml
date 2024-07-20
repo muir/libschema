@@ -58,8 +58,9 @@ jobs:
         run: go test -coverprofile=coverage.txt -covermode=atomic -coverpkg=github.com/muir/libschema/... ./lspostgres/... 
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@894ff025c7b54547a9a2a1e9f228beae737ad3c2
+        uses: codecov/codecov-action@v4.0.1
         with:
-          verbose: true
           flags: pg_tests
           fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

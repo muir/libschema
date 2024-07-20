@@ -58,11 +58,11 @@ jobs:
         env:
           LIBSCHEMA_MYSQL_TEST_DSN: "root:mysql@tcp(127.0.0.1:3306)/libschematest?tls=false"
         run: go test -coverprofile=coverage.txt -covermode=atomic -coverpkg=github.com/muir/libschema/... ./lsmysql/... 
-
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@894ff025c7b54547a9a2a1e9f228beae737ad3c2
+        uses: codecov/codecov-action@v4.0.1
         with:
-          verbose: true
-          flags: mysql_tests
+          flags: myseql_tests
           fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 

@@ -10,22 +10,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@128a63446a954579617e875aaab7d2978154e969
+        uses: step-security/harden-runner@0d381219ddf674d61a7572ddd19d7941e271515c
         with:
           egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
 
-      - uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
         with:
           fetch-depth: 2
-      - uses: actions/setup-go@4d34df0c2316fe8122ab82dc22947d607c0c91f9
+      - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32
         with:
           go-version: '1.18'
       - name: Run coverage
         run: make calculate_coverage
-
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@894ff025c7b54547a9a2a1e9f228beae737ad3c2
+        uses: codecov/codecov-action@v4.0.1
         with:
-          verbose: true
           flags: go_tests
           fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
