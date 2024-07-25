@@ -185,7 +185,7 @@ func (p *SingleStore) CreateSchemaTableIfNotExists(ctx context.Context, _ *inter
 	}
 	if schema != "" {
 		_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
-				CREATE DATABASE IF NOT EXISTS %s
+				CREATE DATABASE IF NOT EXISTS %s PARTITIONS 2
 				`, schema))
 		if err != nil {
 			return errors.Wrapf(err, "Could not create libschema schema '%s'", schema)
