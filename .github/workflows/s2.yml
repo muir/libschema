@@ -36,7 +36,7 @@ jobs:
           mysql -u root -ptest -e "set global log_file_size_ref_dbs = 1048576" -h 127.0.0.1
 
       - name: Check out repository code
-        uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
 
       - name: Set up Go
         uses: actions/setup-go@4d34df0c2316fe8122ab82dc22947d607c0c91f9
