@@ -29,7 +29,11 @@ jobs:
 
       - name: sanity check using mysql client
         run: |
-          mysql -u root -ptest -e "CREATE DATABASE libschematest" -h 127.0.0.1
+          mysql -u root -ptest -e "CREATE DATABASE libschematest partitions 2" -h 127.0.0.1
+          mysql -u root -ptest -e "set global snapshots_to_keep = 1" -h 127.0.0.1
+          mysql -u root -ptest -e "set global minimal_disk_space = 10" -h 127.0.0.1
+          mysql -u root -ptest -e "set global log_file_size_partitions = 1048576" -h 127.0.0.1
+          mysql -u root -ptest -e "set global log_file_size_ref_dbs = 1048576" -h 127.0.0.1
 
       - name: Check out repository code
         uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab
@@ -53,9 +57,11 @@ jobs:
         run: go test -coverprofile=coverage.txt -covermode=atomic -coverpkg=github.com/muir/libschema/... ./lsmysql/... ./lssinglestore/...  
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@894ff025c7b54547a9a2a1e9f228beae737ad3c2
+        uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }
+          version: "v0.1.15"
           verbose: true
-          flags: singlestore_tests
           fail_ci_if_error: true
+          flags: singlestore_tests
 
