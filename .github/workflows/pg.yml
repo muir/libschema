@@ -1,5 +1,5 @@
 name: PostgreSQL tests
-on: [ push ]
+on: [push]
 
 permissions:  # added using https://github.com/step-security/secure-workflows
   contents: read
@@ -25,7 +25,7 @@ jobs:
       - name: Harden Runner
         uses: step-security/harden-runner@0d381219ddf674d61a7572ddd19d7941e271515c
         with:
-          egress-policy: block
+          egress-policy: audit
           allowed-endpoints: >
             api.github.com:443
             codecov.io:443
@@ -42,7 +42,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32
         with:
-          go-version: 1.16
+          go-version: '1.20'
 
       - name: Build
         run: go build -v ./...
@@ -60,8 +60,8 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }
-          version: "v0.1.15"
+          token: ${{ secrets.CODECOV_TOKEN }}
+          #version: "v0.1.15"
           verbose: true
           fail_ci_if_error: true
           flags: pg_tests
