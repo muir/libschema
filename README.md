@@ -33,11 +33,15 @@ schema.  Libschema hopes to start solving this problem.
 Migrations are registered:
 
 ```go
-schema := libschema.NewSchema(ctx, libschema.Options{})
+schema := libschema.New(ctx, libschema.Options{})
 
 sqlDB, err := sql.Open("postgres", "....")
 
-database, err := lspostgres.New(logger, "main-db", schema, sqlDB)
+database, err := lspostgres.New(logger, "main-db", schema, sqlDB) 
+// or
+database, singlestoreHelper, err := lssinglestore.New(logger, "main-db", schema, sqlDB)
+// or
+database, mysqlHelper, err := lssinglestore.New(logger, "main-db", schema, sqlDB)
 
 database.Migrations("MyLibrary",
 	lspostgres.Script("createUserTable", `
