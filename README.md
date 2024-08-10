@@ -19,14 +19,14 @@ Install:
 
 Libschema provides a way for Go libraries to manage their own database migrations.
 
-Trying migrations to libraries supports two things: the first is
+Tying migrations to libraries supports two things: the first is
 source code locality: the migrations can be next to the code that
 uses the tables that the migrations address.
 
-The second is support for migrations in third-party libraries.  This
+The second is support for migrations in third-party libraries. This
 is a relatively unexplored and unsolved problem: how can an open
 source (or proprietary) library specify and maintain a database
-schema.  Libschema hopes to start solving this problem.
+schema? Libschema hopes to start solving this problem. 
 
 ## Register and execute
 
