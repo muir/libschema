@@ -1,9 +1,10 @@
 module github.com/muir/libschema
 
 go 1.20
+toolchain go1.24.1
 
 require (
-	github.com/go-sql-driver/mysql v1.8.1
+	github.com/go-sql-driver/mysql v1.9.1
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/lib/pq v1.10.9
 	github.com/muir/sqltoken v0.1.0
