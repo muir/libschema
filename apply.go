@@ -53,7 +53,7 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 				var err error
 				d.db, err = OpenAnyDB(s.options.Overrides.MigrateDSN)
 				if err != nil {
-					return errors.Wrap(err, "Could not open database")
+					return errors.Wrap(err, "could not open database")
 				}
 			}
 			err = d.prepare(ctx)
@@ -67,7 +67,7 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 				}
 			}()
 			if s.options.Overrides.ErrorIfMigrateNeeded && !d.done(s) {
-				return errors.Errorf("Migrations required for %s", d.DBName)
+				return errors.Errorf("migrations required for %s", d.DBName)
 			}
 			return d.migrate(ctx, s)
 		}(d)
@@ -85,7 +85,7 @@ func (d *Database) prepare(ctx context.Context) error {
 		for _, ref := range migration.Base().rawAfter {
 			after, ok := d.migrationIndex[ref]
 			if !ok {
-				return errors.Errorf("Migration %s for %s is supposed to be after %s for %s but that cannot be found",
+				return errors.Errorf("migration %s for %s is supposed to be after %s for %s but that cannot be found",
 					migration.Base().Name.Name, migration.Base().Name.Library, ref.Name, ref.Library)
 			}
 			nodes[after.Base().order].Blocking = append(nodes[after.Base().order].Blocking, migration.Base().order)
@@ -229,7 +229,7 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 	if m.Base().skipIf != nil {
 		skip, err := m.Base().skipIf()
 		if err != nil {
-			return false, errors.Wrapf(err, "SkipIf %s", m.Base().Name)
+			return false, errors.Wrapf(err, "skipIf %s", m.Base().Name)
 		}
 		if skip {
 			d.log.Debug(" skipping migration")
@@ -240,7 +240,7 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 	if m.Base().skipRemainingIf != nil {
 		skip, err := m.Base().skipRemainingIf()
 		if err != nil {
-			return false, errors.Wrapf(err, "SkipRemainingIf %s", m.Base().Name)
+			return false, errors.Wrapf(err, "skipRemainingIf %s", m.Base().Name)
 		}
 		if skip {
 			d.log.Debug(" skipping remaining migrations")
@@ -294,7 +294,7 @@ func (d *Database) lastUnfinishedSynchrnous() int {
 // allDone reports status
 func (d *Database) allDone(m Migration, err error) {
 	if err != nil && m != nil {
-		err = errors.Wrapf(err, "Migration %s", m.Base().Name)
+		err = errors.Wrapf(err, "migration %s", m.Base().Name)
 	}
 	if d.Options.OnMigrationsComplete != nil {
 		d.Options.OnMigrationsComplete(d, err)

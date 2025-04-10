@@ -22,7 +22,7 @@ func OpenAnyDB(dsn string) (*sql.DB, error) {
 				return sql.Open(driver, dsn)
 			}
 		}
-		return nil, fmt.Errorf("Could not find database driver matching %s", wanted)
+		return nil, fmt.Errorf("could not find database driver matching %s", wanted)
 	}
-	return nil, fmt.Errorf("Could not find appropriate database driver for DSN")
+	return nil, fmt.Errorf("could not find appropriate database driver for DSN")
 }

@@ -112,19 +112,19 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 	}()
 	tx, err := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
+		return nil, errors.Wrapf(err, "begin Tx for migration %s", m.Base().Name)
 	}
 	if d.Options.SchemaOverride != "" {
 		_, err := tx.Exec(`SET search_path TO ` + pq.QuoteIdentifier(d.Options.SchemaOverride))
 		if err != nil {
-			return nil, errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
+			return nil, errors.Wrapf(err, "set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 		}
 	}
 	defer func() {
 		if err != nil {
 			_ = tx.Rollback()
 		} else {
-			err = errors.Wrapf(tx.Commit(), "Commit migration %s", m.Base().Name)
+			err = errors.Wrapf(tx.Commit(), "commit migration %s", m.Base().Name)
 		}
 	}()
 	pm := m.(*pmigration)
@@ -136,11 +136,11 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 		err = pm.computed(ctx, tx)
 	}
 	if err != nil {
-		err = errors.Wrapf(err, "Problem with migration %s", m.Base().Name)
+		err = errors.Wrapf(err, "problem with migration %s", m.Base().Name)
 		_ = tx.Rollback()
 		ntx, txerr := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
 		if txerr != nil {
-			return nil, errors.Wrapf(err, "Tx for saving status for %s also failed with %s", m.Base().Name, txerr)
+			return nil, errors.Wrapf(err, "tx for saving status for %s also failed with %s", m.Base().Name, txerr)
 		}
 		tx = ntx
 	}
@@ -149,7 +149,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 		if err == nil {
 			err = txerr
 		} else {
-			err = errors.Wrapf(err, "Save status for %s also failed: %s", m.Base().Name, txerr)
+			err = errors.Wrapf(err, "save status for %s also failed: %s", m.Base().Name, txerr)
 		}
 	}
 	return
@@ -167,7 +167,7 @@ func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal
 				CREATE SCHEMA IF NOT EXISTS %s
 				`, schema))
 		if err != nil {
-			return errors.Wrapf(err, "Could not create libschema schema '%s'", schema)
+			return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
 		}
 	}
 	for {
@@ -187,7 +187,7 @@ func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal
 				time.Sleep(time.Second)
 				continue
 			}
-			return errors.Wrapf(err, "Could not create libschema migrations table '%s'", tableName)
+			return errors.Wrapf(err, "could not create libschema migrations table '%s'", tableName)
 		}
 		break
 	}
@@ -205,7 +205,7 @@ func trackingSchemaTable(d *libschema.Database) (string, string, error) {
 	case 1:
 		return "", pq.QuoteIdentifier(tableName), nil
 	default:
-		return "", "", errors.Errorf("Tracking table '%s' is not valid", tableName)
+		return "", "", errors.Errorf("tracking table '%s' is not valid", tableName)
 	}
 }
 
@@ -236,7 +236,7 @@ func (p *Postgres) saveStatus(log *internal.Log, tx *sql.Tx, d *libschema.Databa
 			`, trackingTable(d))
 	_, err := tx.Exec(q, m.Base().Name.Library, m.Base().Name.Name, done, estr)
 	if err != nil {
-		return errors.Wrapf(err, "Save status for %s", m.Base().Name)
+		return errors.Wrapf(err, "save status for %s", m.Base().Name)
 	}
 	return nil
 }
@@ -254,11 +254,11 @@ func (p *Postgres) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *
 		VALUES ('lock', '', '', true, '')
 		ON CONFLICT DO NOTHING`, tableName))
 	if err != nil {
-		return errors.Wrapf(err, "Could not add lock row to %s", tableName)
+		return errors.Wrapf(err, "could not add lock row to %s", tableName)
 	}
 	tx, err := d.DB().BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return errors.Wrap(err, "Could not start transaction: %s")
+		return errors.Wrap(err, "could not start transaction: %s")
 	}
 	var junk string
 	err = tx.QueryRow(fmt.Sprintf(`
@@ -267,7 +267,7 @@ func (p *Postgres) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *
 		WHERE	metadata = 'lock'
 		FOR UPDATE`, tableName)).Scan(&junk)
 	if err != nil {
-		return errors.Wrapf(err, "Could not lock libschema migrations table '%s'", tableName)
+		return errors.Wrapf(err, "could not lock libschema migrations table '%s'", tableName)
 	}
 	p.lockTx = tx
 	return nil
@@ -286,16 +286,21 @@ func (p *Postgres) UnlockMigrationsTable(_ *internal.Log) error {
 
 // LoadStatus loads the current status of all migrations from the migration tracking table.
 // It is expected to be called by libschema.
-func (p *Postgres) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Database) ([]libschema.MigrationName, error) {
+func (p *Postgres) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Database) (_ []libschema.MigrationName, err error) {
 	tableName := trackingTable(d)
 	rows, err := d.DB().QueryContext(ctx, fmt.Sprintf(`
 		SELECT	library, migration, done
 		FROM	%s
 		WHERE	metadata = ''`, tableName))
 	if err != nil {
-		return nil, errors.Wrap(err, "Cannot query migration status")
+		return nil, errors.Wrap(err, "cannot query migration status")
 	}
-	defer rows.Close()
+	defer func() {
+		e := rows.Close()
+		if e != nil && err == nil {
+			err = errors.Wrap(e, "close scan migration status")
+		}
+	}()
 	var unknowns []libschema.MigrationName
 	for rows.Next() {
 		var (
@@ -304,7 +309,7 @@ func (p *Postgres) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema
 		)
 		err := rows.Scan(&name.Library, &name.Name, &status.Done)
 		if err != nil {
-			return nil, errors.Wrap(err, "Cannot scan migration status")
+			return nil, errors.Wrap(err, "cannot scan migration status")
 		}
 		if m, ok := d.Lookup(name); ok {
 			m.Base().SetStatus(status)
@@ -321,7 +326,7 @@ func (p *Postgres) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema
 func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ *internal.Log, migration libschema.Migration) error {
 	m, ok := migration.(*pmigration)
 	if !ok {
-		return fmt.Errorf("Non-postgres migration %s registered with postgres migrations", migration.Base().Name)
+		return fmt.Errorf("non-postgres migration %s registered with postgres migrations", migration.Base().Name)
 	}
 	if m.script != nil {
 		return nil
@@ -329,5 +334,5 @@ func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ *internal.Log, 
 	if m.computed != nil {
 		return nil
 	}
-	return errors.Errorf("Migration %s is not supported", m.Name)
+	return errors.Errorf("migration %s is not supported", m.Name)
 }

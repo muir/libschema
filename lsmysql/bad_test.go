@@ -32,7 +32,7 @@ func TestBadMigrationsMysql(t *testing.T) {
 		},
 		{
 			name:  "wrong db",
-			error: `Non-mysql`,
+			error: `non-mysql`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2",
 					lspostgres.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`),
@@ -49,28 +49,28 @@ func TestBadMigrationsMysql(t *testing.T) {
 		},
 		{
 			name:  "bad table1",
-			error: `Tracking table 'foo.bar.baz' is not valid`,
+			error: `tracking table 'foo.bar.baz' is not valid`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "foo.bar.baz"
 			},
 		},
 		{
 			name:  "bad table2",
-			error: `Tracking table schema name must be a simple identifier, not 'foo'bar'`,
+			error: `tracking table schema name must be a simple identifier, not 'foo'bar'`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "foo'bar.baz"
 			},
 		},
 		{
 			name:  "non idempotent",
-			error: `Unconditional migration has non-idempotent DDL (Data Definition Language [schema changes]`,
+			error: `unconditional migration has non-idempotent DDL (Data Definition Language [schema changes]`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2", lsmysql.Script("T4", `CREATE TABLE T1 (id text) TYPE = InnoDB`))
 			},
 		},
 		{
 			name:  "combines data & ddl",
-			error: `Migration combines DDL (Data Definition Language [schema changes]) and data manipulation`,
+			error: `migration combines DDL (Data Definition Language [schema changes]) and data manipulation`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2", lsmysql.Script("T4", `
 					CREATE TABLE IF NOT EXISTST1 (id text) TYPE = InnoDB;
@@ -80,21 +80,21 @@ func TestBadMigrationsMysql(t *testing.T) {
 		},
 		{
 			name:  "bad table3",
-			error: `Tracking table table name must be a simple identifier, not 'bar'baz'`,
+			error: `tracking table table name must be a simple identifier, not 'bar'baz'`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "foo.bar'baz"
 			},
 		},
 		{
 			name:  "bad table4",
-			error: `Tracking table table name must be a simple identifier, not 'bar'baz'`,
+			error: `tracking table table name must be a simple identifier, not 'bar'baz'`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "bar'baz"
 			},
 		},
 		{
 			name:  "bad schema",
-			error: `Options.SchemaOverride must be a simple identifier`,
+			error: `options.SchemaOverride must be a simple identifier`,
 			reopt: func(o *libschema.Options) {
 				o.SchemaOverride = `"foo."bar.baz"`
 			},
@@ -120,7 +120,9 @@ func testBadMigration(t *testing.T, expected string, define func(*libschema.Data
 
 	db, err := sql.Open("mysql", dsn)
 	require.NoError(t, err, "open database")
-	defer db.Close()
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
 	defer cleanup(db)
 
 	if reopt != nil {

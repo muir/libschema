@@ -60,7 +60,9 @@ func TestPostgresMigrations(t *testing.T) {
 
 	db, err := sql.Open("postgres", dsn)
 	require.NoError(t, err, "open database")
-	defer db.Close()
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
 	defer cleanup(db)
 
 	s := libschema.New(context.Background(), options)
@@ -152,7 +154,9 @@ func TestPostgresMigrations(t *testing.T) {
 		WHERE	table_schema = $1
 		ORDER	BY table_name`, options.SchemaOverride)
 	require.NoError(t, err, "query for list of tables")
-	defer rows.Close()
+	defer func() {
+		assert.NoError(t, rows.Close())
+	}()
 	var names []string
 	for rows.Next() {
 		var name string

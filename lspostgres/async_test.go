@@ -37,7 +37,7 @@ func TestAsyncMigrations(t *testing.T) {
 	require.NoError(t, err, "open database")
 	defer func() {
 		t.Log("Closing db...")
-		db.Close()
+		_ = db.Close()
 		t.Log("done")
 	}()
 	defer func() {

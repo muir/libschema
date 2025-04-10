@@ -59,6 +59,7 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 		return nil, nil, err
 	}
 	if database.Options.SchemaOverride != "" {
+		//nolint:staticcheck // QF1008: could remove embedded field "MySQL" from selector
 		s2.MySQL.UseDatabase(database.Options.SchemaOverride)
 	}
 	return database, s2, nil
@@ -73,7 +74,8 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 func Generate(
 	name string,
 	generator func(context.Context, *sql.Tx) string,
-	opts ...libschema.MigrationOption) libschema.Migration {
+	opts ...libschema.MigrationOption,
+) libschema.Migration {
 	return lsmysql.Generate(name, generator, opts...)
 }
 
@@ -82,7 +84,8 @@ func Generate(
 func Computed(
 	name string,
 	action func(context.Context, *sql.Tx) error,
-	opts ...libschema.MigrationOption) libschema.Migration {
+	opts ...libschema.MigrationOption,
+) libschema.Migration {
 	return lsmysql.Computed(name, action, opts...)
 }
 
@@ -135,9 +138,11 @@ func (p *SingleStore) UnlockMigrationsTable(_ *internal.Log) error {
 	return errors.Wrap(err, "rollback lock-holding transaction")
 }
 
-var simpleIdentifierRE = regexp.MustCompile(`\A[A-Za-z][A-Za-z0-9_]*\z`)
-var alreadyQuotedRE = regexp.MustCompile("`[^`]+`")
-var cannotQuoteRE = regexp.MustCompile("`")
+var (
+	simpleIdentifierRE = regexp.MustCompile(`\A[A-Za-z][A-Za-z0-9_]*\z`)
+	alreadyQuotedRE    = regexp.MustCompile("`[^`]+`")
+	cannotQuoteRE      = regexp.MustCompile("`")
+)
 
 func makeID(raw string) (string, error) {
 	switch {

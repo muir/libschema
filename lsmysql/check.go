@@ -9,9 +9,15 @@ import (
 	"github.com/pkg/errors"
 )
 
-var ErrDataAndDDL = errors.New("Migration combines DDL (Data Definition Language [schema changes]) and data manipulation")
-var ErrNonIdempotentDDL = errors.New("Unconditional migration has non-idempotent DDL (Data Definition Language [schema changes])")
-var ifExistsRE = regexp.MustCompile(`(?i)\bIF (?:NOT )?EXISTS\b`)
+var (
+	// ErrDataAndDDL is returned when a migration combines DML and DDL
+	ErrDataAndDDL = errors.New("migration combines DDL (Data Definition Language [schema changes]) and data manipulation")
+
+	// ErrNonIdempotentDDL is returned when a migration has non-idempotent DDL
+	ErrNonIdempotentDDL = errors.New("unconditional migration has non-idempotent DDL (Data Definition Language [schema changes])")
+
+	ifExistsRE = regexp.MustCompile(`(?i)\bIF (?:NOT )?EXISTS\b`)
+)
 
 // CheckScript attempts to validate that an SQL command does not do
 // both schema changes (DDL) and data changes.  The returned error
