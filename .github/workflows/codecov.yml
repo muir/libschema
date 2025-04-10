@@ -26,8 +26,10 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          version: "v0.1.15"
-          verbose: true
           fail_ci_if_error: true
+          files: ./coverage.txt
           flags: go_tests
+          name: go_tests
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
