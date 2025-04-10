@@ -111,7 +111,8 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 func Generate(
 	name string,
 	generator func(context.Context, *sql.Tx) string,
-	opts ...libschema.MigrationOption) libschema.Migration {
+	opts ...libschema.MigrationOption,
+) libschema.Migration {
 	return mmigration{
 		MigrationBase: libschema.MigrationBase{
 			Name: libschema.MigrationName{
@@ -127,7 +128,8 @@ func Generate(
 func Computed(
 	name string,
 	action func(context.Context, *sql.Tx) error,
-	opts ...libschema.MigrationOption) libschema.Migration {
+	opts ...libschema.MigrationOption,
+) libschema.Migration {
 	return mmigration{
 		MigrationBase: libschema.MigrationBase{
 			Name: libschema.MigrationName{
@@ -172,11 +174,11 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 	}()
 	if d.Options.SchemaOverride != "" {
 		if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
-			return nil, errors.Errorf("Options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
+			return nil, errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
 		}
 		_, err := tx.Exec(`USE ` + d.Options.SchemaOverride)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
+			return nil, errors.Wrapf(err, "set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 		}
 	}
 	pm := m.(*mmigration)
@@ -196,11 +198,11 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 		err = pm.computed(ctx, tx)
 	}
 	if err != nil {
-		err = errors.Wrapf(err, "Problem with migration %s", m.Base().Name)
+		err = errors.Wrapf(err, "problem with migration %s", m.Base().Name)
 		_ = tx.Rollback()
 		ntx, txerr := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
 		if txerr != nil {
-			return nil, errors.Wrapf(err, "Tx for saving status for %s also failed with %s", m.Base().Name, txerr)
+			return nil, errors.Wrapf(err, "tx for saving status for %s also failed with %s", m.Base().Name, txerr)
 		}
 		tx = ntx
 	}
@@ -209,7 +211,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 		if err == nil {
 			err = txerr
 		} else {
-			err = errors.Wrapf(err, "Save status for %s also failed: %s", m.Base().Name, txerr)
+			err = errors.Wrapf(err, "save status for %s also failed: %s", m.Base().Name, txerr)
 		}
 	}
 	return
@@ -229,7 +231,7 @@ func (p *MySQL) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Lo
 				CREATE SCHEMA IF NOT EXISTS %s
 				`, schema))
 		if err != nil {
-			return errors.Wrapf(err, "Could not create libschema schema '%s'", schema)
+			return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
 		}
 	}
 	_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
@@ -242,7 +244,7 @@ func (p *MySQL) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Lo
 			PRIMARY KEY	(library, migration)
 		) ENGINE = InnoDB`, tableName))
 	if err != nil {
-		return errors.Wrapf(err, "Could not create libschema migrations table '%s'", tableName)
+		return errors.Wrapf(err, "could not create libschema migrations table '%s'", tableName)
 	}
 	return nil
 }
@@ -270,20 +272,20 @@ func trackingSchemaTable(d *libschema.Database) (string, string, string, error) 
 	case 2:
 		schema := s[0]
 		if !simpleIdentifierRE.MatchString(schema) {
-			return "", "", "", errors.Errorf("Tracking table schema name must be a simple identifier, not '%s'", schema)
+			return "", "", "", errors.Errorf("tracking table schema name must be a simple identifier, not '%s'", schema)
 		}
 		table := s[1]
 		if !simpleIdentifierRE.MatchString(table) {
-			return "", "", "", errors.Errorf("Tracking table table name must be a simple identifier, not '%s'", table)
+			return "", "", "", errors.Errorf("tracking table table name must be a simple identifier, not '%s'", table)
 		}
 		return schema, schema + "." + table, table, nil
 	case 1:
 		if !simpleIdentifierRE.MatchString(tableName) {
-			return "", "", "", errors.Errorf("Tracking table table name must be a simple identifier, not '%s'", tableName)
+			return "", "", "", errors.Errorf("tracking table table name must be a simple identifier, not '%s'", tableName)
 		}
 		return "", tableName, tableName, nil
 	default:
-		return "", "", "", errors.Errorf("Tracking table '%s' is not valid", tableName)
+		return "", "", "", errors.Errorf("tracking table '%s' is not valid", tableName)
 	}
 }
 
@@ -309,7 +311,7 @@ func (p *MySQL) saveStatus(log *internal.Log, tx *sql.Tx, d *libschema.Database,
 		VALUES (?, ?, ?, ?, ?, now())`, p.trackingTable(d))
 	_, err := tx.Exec(q, p.databaseName, m.Base().Name.Library, m.Base().Name.Name, done, estr)
 	if err != nil {
-		return errors.Wrapf(err, "Save status for %s", m.Base().Name)
+		return errors.Wrapf(err, "save status for %s", m.Base().Name)
 	}
 	return nil
 }
@@ -345,7 +347,7 @@ func (p *MySQL) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *lib
 	var gotLock int
 	err = tx.QueryRow(`SELECT GET_LOCK(?, -1)`, p.lockStr).Scan(&gotLock)
 	if err != nil {
-		return errors.Wrapf(err, "Could not get lock for libschema migrations")
+		return errors.Wrapf(err, "could not get lock for libschema migrations")
 	}
 	p.lockTx = tx
 
@@ -429,7 +431,7 @@ func (p *MySQL) UnlockMigrationsTable(_ *internal.Log) error {
 // It is expected to be called by libschema and is not
 // called internally which means that is safe to override
 // in types that embed MySQL.
-func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Database) ([]libschema.MigrationName, error) {
+func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Database) (_ []libschema.MigrationName, err error) {
 	// TODO: DRY
 	tableName := p.trackingTable(d)
 	rows, err := d.DB().QueryContext(ctx, fmt.Sprintf(`
@@ -437,9 +439,14 @@ func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Da
 		FROM	%s
 		WHERE	db_name = ?`, tableName), p.databaseName)
 	if err != nil {
-		return nil, errors.Wrap(err, "Cannot query migration status")
+		return nil, errors.Wrap(err, "cannot query migration status")
 	}
-	defer rows.Close()
+	defer func() {
+		e := rows.Close()
+		if e != nil && err == nil {
+			err = errors.Wrap(e, "close scan on migration table")
+		}
+	}()
 	var unknowns []libschema.MigrationName
 	for rows.Next() {
 		var (
@@ -448,7 +455,7 @@ func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Da
 		)
 		err := rows.Scan(&name.Library, &name.Name, &status.Done)
 		if err != nil {
-			return nil, errors.Wrap(err, "Cannot scan migration status")
+			return nil, errors.Wrap(err, "cannot scan migration status")
 		}
 		if m, ok := d.Lookup(name); ok {
 			m.Base().SetStatus(status)
@@ -468,7 +475,7 @@ func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Da
 func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ *internal.Log, migration libschema.Migration) error {
 	m, ok := migration.(*mmigration)
 	if !ok {
-		return fmt.Errorf("Non-mysql migration %s registered with mysql migrations", migration.Base().Name)
+		return fmt.Errorf("non-mysql migration %s registered with mysql migrations", migration.Base().Name)
 	}
 	if m.script != nil {
 		return nil
@@ -476,5 +483,5 @@ func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ *internal.Log, mig
 	if m.computed != nil {
 		return nil
 	}
-	return errors.Errorf("Migration %s is not supported", m.Name)
+	return errors.Errorf("migration %s is not supported", m.Name)
 }

@@ -50,7 +50,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 		},
 		{
 			name:  "bad skip",
-			error: `SkipIf L2: T4: oops`,
+			error: `skipIf L2: T4: oops`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2",
 					lspostgres.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`,
@@ -62,7 +62,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 		},
 		{
 			name:  "wrong db",
-			error: `Non-postgres`,
+			error: `non-postgres`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2",
 					lsmysql.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`),
@@ -71,7 +71,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 		},
 		{
 			name:  "bad dependency",
-			error: `Migration T4 for L2 is supposed to be after T9 for T1 but that cannot be found`,
+			error: `migration T4 for L2 is supposed to be after T9 for T1 but that cannot be found`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2",
 					lsmysql.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`,
@@ -90,7 +90,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 		},
 		{
 			name:  "bad table",
-			error: `Tracking table 'foo.bar.baz' is not valid`,
+			error: `tracking table 'foo.bar.baz' is not valid`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "foo.bar.baz"
 			},
@@ -104,7 +104,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 		},
 		{
 			name:  "bad dsn",
-			error: `Could not find appropriate database driver for DSN`,
+			error: `could not find appropriate database driver for DSN`,
 			reopt: func(o *libschema.Options) {
 				o.Overrides = &libschema.OverrideOptions{
 					MigrateDSN: "xyz",
@@ -136,7 +136,9 @@ func testBadMigration(t *testing.T, expected string,
 
 	db, err := libschema.OpenAnyDB(dsn)
 	require.NoError(t, err, "open database")
-	defer db.Close()
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
 	defer cleanup(db)
 
 	if first != nil {

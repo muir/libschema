@@ -5,6 +5,8 @@ all:
 	go generate
 	go test
 	golangci-lint run
+	@ echo any output from the following command indicates an out-of-date direct dependency
+	go list -u -m -f '{{if (and (not .Indirect) .Update)}}{{.}}{{end}}' all
 
 coverageO:
 	go install github.com/eltorocorp/drygopher/drygopher@latest
@@ -28,3 +30,8 @@ golanglint:
 	# binary will be $(go env GOPATH)/bin/golangci-lint
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.45.2
 	golangci-lint --version
+
+misspell:;
+	go install github.com/client9/misspell/cmd/misspell@latest
+	misspell -w `find . -name \*.md`
+

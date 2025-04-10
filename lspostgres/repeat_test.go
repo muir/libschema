@@ -22,7 +22,7 @@ func TestRepeat(t *testing.T) {
 	db, err := sql.Open("postgres", dsn)
 	require.NoError(t, err)
 	defer func() {
-		db.Close()
+		assert.NoError(t, db.Close())
 	}()
 
 	options, cleanup := lstesting.FakeSchema(t, "CASCADE")

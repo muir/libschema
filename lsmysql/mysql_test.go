@@ -84,7 +84,9 @@ func testMysqlHappyPath(t *testing.T, dsn string, createPostfix string, driverNe
 	t.Log("No opening the database...")
 	db, err := sql.Open("mysql", dsn)
 	require.NoError(t, err, "open database")
-	defer db.Close()
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
 	defer cleanup(db)
 
 	s := libschema.New(context.Background(), options)
@@ -183,7 +185,9 @@ func testMysqlHappyPath(t *testing.T, dsn string, createPostfix string, driverNe
 		WHERE	table_schema = ?
 		ORDER	BY table_name`, options.SchemaOverride)
 	require.NoError(t, err, "query for list of tables")
-	defer rows.Close()
+	defer func() {
+		assert.NoError(t, rows.Close())
+	}()
 	var names []string
 	for rows.Next() {
 		var name string
@@ -223,7 +227,6 @@ func TestMysqlNotAllowed(t *testing.T) {
 }
 
 func testMysqlNotAllowed(t *testing.T, dsn string, createPostfix string, driverNew driverNew) {
-
 	cases := []struct {
 		name      string
 		migration string
@@ -235,12 +238,12 @@ func testMysqlNotAllowed(t *testing.T, dsn string, createPostfix string, driverN
 				CREATE TABLE T1 (id text) ` + createPostfix + `;
 				INSERT INTO T1 (id) VALUES ('x');
 				`,
-			errorText: "Migration combines DDL",
+			errorText: "migration combines DDL",
 		},
 		{
 			name:      "unconditional",
 			migration: `CREATE TABLE T1 (id text) ` + createPostfix,
-			errorText: "Unconditional migration has non-idempotent",
+			errorText: "unconditional migration has non-idempotent",
 		},
 	}
 
@@ -251,7 +254,9 @@ func testMysqlNotAllowed(t *testing.T, dsn string, createPostfix string, driverN
 
 		db, err := sql.Open("mysql", dsn)
 		require.NoError(t, err, "open database")
-		defer db.Close()
+		defer func() {
+			assert.NoError(t, db.Close())
+		}()
 		defer cleanup(db)
 
 		dbase, _, err := driverNew(t, "test", s, db)

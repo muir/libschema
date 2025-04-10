@@ -114,14 +114,14 @@ func TestOverrideErrorIfMigrateNeeded(t *testing.T) {
 		t.Log("Closing db...")
 		if db != nil {
 			cleanup(db)
-			db.Close()
+			assert.NoError(t, db.Close())
 		}
 		t.Log("done")
 	}()
 	require.Error(t, err)
 	assert.Equal(t, "", code)
 	assert.Equal(t, "", code2)
-	assert.Contains(t, err.Error(), "Migrations required for test2")
+	assert.Contains(t, err.Error(), "migrations required for test2")
 
 	t.Log("Now we actually do the migrations")
 	_, err = doConfigMigrate(t, &options, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
@@ -171,7 +171,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 	defer func() {
 		if options == nil {
 			t.Log("Closing db...")
-			db.Close()
+			assert.NoError(t, db.Close())
 			t.Log("done")
 		}
 	}()

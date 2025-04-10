@@ -65,7 +65,9 @@ func TestSingleStoreFailedMigration(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		db, err := sql.Open("mysql", dsn)
 		require.NoError(t, err, "open database")
-		defer db.Close()
+		defer func() {
+			assert.NoError(t, db.Close())
+		}()
 		defer cleanup(db)
 
 		s := libschema.New(context.Background(), options)
