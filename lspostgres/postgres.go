@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"
@@ -20,13 +21,16 @@ import (
 // * Support UPSERT using INSERT ... ON CONFLICT
 type Postgres struct {
 	lockTx *sql.Tx
+	log    *internal.Log
 }
 
 // New creates a libschema.Database with a postgres driver built in.  The dbName
 // parameter is used internally by libschema, but does not affect where migrations
 // are actually applied.
 func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, error) {
-	return schema.NewDatabase(log, dbName, db, &Postgres{})
+	return schema.NewDatabase(log, dbName, db, &Postgres{
+		log: log,
+	})
 }
 
 type pmigration struct {
@@ -59,7 +63,8 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 func Generate(
 	name string,
 	generator func(context.Context, *sql.Tx) string,
-	opts ...libschema.MigrationOption) libschema.Migration {
+	opts ...libschema.MigrationOption,
+) libschema.Migration {
 	return pmigration{
 		MigrationBase: libschema.MigrationBase{
 			Name: libschema.MigrationName{
@@ -75,7 +80,8 @@ func Generate(
 func Computed(
 	name string,
 	action func(context.Context, *sql.Tx) error,
-	opts ...libschema.MigrationOption) libschema.Migration {
+	opts ...libschema.MigrationOption,
+) libschema.Migration {
 	return pmigration{
 		MigrationBase: libschema.MigrationBase{
 			Name: libschema.MigrationName{
@@ -164,7 +170,8 @@ func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal
 			return errors.Wrapf(err, "Could not create libschema schema '%s'", schema)
 		}
 	}
-	_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
+	for {
+		_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			metadata	varchar(255) NOT NULL DEFAULT '',
 			library		varchar(255) NOT NULL,
@@ -174,8 +181,15 @@ func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal
 			updated_at	timestamp with time zone DEFAULT now(),
 			PRIMARY KEY	(metadata, library, migration)
 		)`, tableName))
-	if err != nil {
-		return errors.Wrapf(err, "Could not create libschema migrations table '%s'", tableName)
+		if err != nil {
+			if strings.Contains(err.Error(), `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`) {
+				p.log.Warn("Ignoring create table collision with another transaction and trying again")
+				time.Sleep(time.Second)
+				continue
+			}
+			return errors.Wrapf(err, "Could not create libschema migrations table '%s'", tableName)
+		}
+		break
 	}
 	return nil
 }
