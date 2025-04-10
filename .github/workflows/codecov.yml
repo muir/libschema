@@ -30,4 +30,4 @@ jobs:
           version: "v0.1.15"
           verbose: true
           fail_ci_if_error: true
-          flags: go_tests
+          "report-code": go_tests

@@ -63,5 +63,5 @@ jobs:
           version: "v0.1.15"
           verbose: true
           fail_ci_if_error: true
-          flags: singlestore_tests
+          "report-code": singlestore_tests
 

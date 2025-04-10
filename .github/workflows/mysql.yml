@@ -65,5 +65,5 @@ jobs:
           version: "v0.1.15"
           verbose: true
           fail_ci_if_error: true
-          flags: mysql_tests
+          "report-code": mysql_tests
 
