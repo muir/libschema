@@ -162,13 +162,21 @@ func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal
 	if err != nil {
 		return err
 	}
-	if schema != "" {
-		_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
-				CREATE SCHEMA IF NOT EXISTS %s
-				`, schema))
-		if err != nil {
-			return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
+	for {
+		if schema != "" {
+			_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
+					CREATE SCHEMA IF NOT EXISTS %s
+					`, schema))
+			if err != nil {
+				if strings.Contains(err.Error(), `pq: duplicate key value violates unique constraint "pg_namespace_nspname_index"`) {
+					p.log.Warn("Ignoring create schema collision with another transaction and trying again")
+					time.Sleep(time.Second)
+					continue
+				}
+				return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
+			}
 		}
+		break
 	}
 	for {
 		_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
