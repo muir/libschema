@@ -119,18 +119,6 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 	return m
 }
 
-// ForceNonTransactional forces a migration to execute without wrapping transaction (Exec on *sql.DB).
-// As with Postgres driver parity, this asserts idempotency / retry safety.
-func ForceNonTransactional() libschema.MigrationOption {
-	return func(m libschema.Migration) { m.Base().SetNonTransactional(true) }
-}
-
-// ForceTransactional ensures a migration executes in a transaction (if possible) even if a generic type
-// argument would infer non-transactional.
-func ForceTransactional() libschema.MigrationOption {
-	return func(m libschema.Migration) { m.Base().SetNonTransactional(false) }
-}
-
 // Generate defines a migration returning a SQL string. If T implements TxLike it's transactional else non-transactional.
 func Generate[T ExecConn](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
 	var z T

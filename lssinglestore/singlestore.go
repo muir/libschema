@@ -78,10 +78,6 @@ func Computed[T lsmysql.ExecConn](name string, action func(context.Context, T) e
 	return lsmysql.Computed[T](name, action, opts...)
 }
 
-// Re-export force options for convenience.
-func ForceNonTransactional() libschema.MigrationOption { return lsmysql.ForceNonTransactional() }
-func ForceTransactional() libschema.MigrationOption    { return lsmysql.ForceTransactional() }
-
 // LockMigrationsTable locks the migration tracking table for exclusive use by the
 // migrations running now.
 // It is expected to be called by libschema.

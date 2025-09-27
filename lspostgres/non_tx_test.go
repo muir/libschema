@@ -147,7 +147,7 @@ func TestPostgresNonTx_ForceOptionVacuum(t *testing.T) {
 	dbase.Migrations("L1",
 		lspostgres.Script("T1", `CREATE TABLE t1 (id int)`),
 		// Force classification since VACUUM cannot run in a transaction, but we removed pattern registration.
-		lspostgres.Script("VAC", `VACUUM ANALYZE`, lspostgres.ForceNonTransactional()),
+		lspostgres.Script("VAC", `VACUUM ANALYZE`, libschema.ForceNonTransactional()),
 	)
 
 	err = s.Migrate(context.Background())

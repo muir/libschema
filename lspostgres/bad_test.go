@@ -118,7 +118,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 			sentinel: libschema.ErrNonIdempotentNonTx,
 			define: func(dbase *libschema.Database) {
 				// Force non-transactional so idempotency validation executes for CREATE TABLE
-				dbase.Migrations("L2", lspostgres.Script("T4", `CREATE TABLE t1 (id text)`, lspostgres.ForceNonTransactional()))
+				dbase.Migrations("L2", lspostgres.Script("T4", `CREATE TABLE t1 (id text)`, libschema.ForceNonTransactional()))
 			},
 		},
 		{
@@ -126,7 +126,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 			sentinel: libschema.ErrNonTxMultipleStatements,
 			define: func(dbase *libschema.Database) {
 				// Forcing non-transactional turns multi-statement into an error before stmtcheck classification
-				dbase.Migrations("L2", lspostgres.Script("T4", `CREATE TABLE IF NOT EXISTS t1 (id text); INSERT INTO t1 (id) VALUES ('foo')`, lspostgres.ForceNonTransactional()))
+				dbase.Migrations("L2", lspostgres.Script("T4", `CREATE TABLE IF NOT EXISTS t1 (id text); INSERT INTO t1 (id) VALUES ('foo')`, libschema.ForceNonTransactional()))
 			},
 		},
 	}

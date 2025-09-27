@@ -157,10 +157,6 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 	return m
 }
 
-// Deprecated: use libschema.ForceNonTransactional / libschema.ForceTransactional directly.
-func ForceNonTransactional() libschema.MigrationOption { return libschema.ForceNonTransactional() }
-func ForceTransactional() libschema.MigrationOption    { return libschema.ForceTransactional() }
-
 // Generate defines a migration that returns a SQL string. If T implements TxLike
 // the migration is transactional; otherwise it is marked non-transactional.
 func Generate[T ExecConn](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
