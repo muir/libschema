@@ -28,6 +28,7 @@ func openMySQL(t *testing.T) *sql.DB {
 
 // TestGenerateInference ensures Generate infers transactional when *sql.Tx used and non-tx when *sql.DB
 func TestGenerateInference(t *testing.T) {
+	t.Parallel()
 	db := openMySQL(t)
 	options, cleanup := lstesting.FakeSchema(t, "")
 	defer func() { cleanup(db) }()
@@ -57,6 +58,7 @@ func TestGenerateInference(t *testing.T) {
 
 // TestComputedInference mirrors TestGenerateInference for Computed
 func TestComputedInference(t *testing.T) {
+	t.Parallel()
 	db := openMySQL(t)
 	options, cleanup := lstesting.FakeSchema(t, "")
 	defer func() { cleanup(db) }()
@@ -87,6 +89,7 @@ func TestComputedInference(t *testing.T) {
 
 // TestForceOverride validates ForceTransactional / ForceNonTransactional override inference.
 func TestForceOverride(t *testing.T) {
+	t.Parallel()
 	db := openMySQL(t)
 	options, cleanup := lstesting.FakeSchema(t, "")
 	defer func() { cleanup(db) }()

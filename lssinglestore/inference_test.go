@@ -26,6 +26,7 @@ func openSingleStore(t *testing.T) *sql.DB {
 }
 
 func TestGenerateInference(t *testing.T) {
+	t.Parallel()
 	db := openSingleStore(t)
 	options, cleanup := lstesting.FakeSchema(t, "")
 	defer func() { cleanup(db) }()
@@ -49,6 +50,7 @@ func TestGenerateInference(t *testing.T) {
 }
 
 func TestComputedInference(t *testing.T) {
+	t.Parallel()
 	db := openSingleStore(t)
 	options, cleanup := lstesting.FakeSchema(t, "")
 	defer func() { cleanup(db) }()
@@ -77,6 +79,7 @@ func TestComputedInference(t *testing.T) {
 }
 
 func TestForceOverride(t *testing.T) {
+	t.Parallel()
 	db := openSingleStore(t)
 	options, cleanup := lstesting.FakeSchema(t, "")
 	defer func() { cleanup(db) }()

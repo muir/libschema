@@ -16,6 +16,7 @@ import (
 )
 
 func TestSingleStoreSkipFunctions(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("LIBSCHEMA_SINGLESTORE_TEST_DSN")
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_SINGLESTORE_TEST_DSN to test SingleStore support in libschema/lssinglestore")
@@ -28,11 +29,8 @@ func TestSingleStoreSkipFunctions(t *testing.T) {
 	t.Log("DSN=", dsn)
 	db, err := sql.Open("mysql", dsn)
 	require.NoError(t, err, "open database")
-	defer func() {
-		assert.NoError(t, db.Close())
-	}()
-	_ = cleanup
-	// defer cleanup(db)
+	defer func() { assert.NoError(t, db.Close()) }()
+	defer func() { cleanup(db) }()
 
 	dbase, m, err := lssinglestore.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")

@@ -15,6 +15,7 @@ import (
 )
 
 func TestRepeat(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")

@@ -211,10 +211,6 @@ func Computed[T ExecConn](name string, action func(context.Context, T) error, op
 func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (res sql.Result, err error) {
 	pm := m.(*pmigration)
 
-	// TODO(doc): Expand README section for RepeatUntilNoOp describing risks when wrapping
-	// statements whose reported RowsAffected is unreliable (e.g., many DDL / non-transactional
-	// idempotent statements) to avoid accidental tight loops or misleading retry behavior.
-
 	// Ensure server version adjustments applied once we have a DB.
 	if p.serverMajor == 0 {
 		if maj, _ := p.ServerVersion(ctx, d.DB()); maj != 0 {
@@ -300,9 +296,9 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 
 	// Execute body
 	if pm.scriptAny != nil {
-		sqlText, sErr := pm.scriptAny(ctx, execConn)
-		if sErr != nil {
-			return nil, sErr
+		sqlText, err := pm.scriptAny(ctx, execConn)
+		if err != nil {
+			return nil, err
 		}
 		trim := strings.TrimSpace(sqlText)
 		if trim == "" { // treat as no-op, allow generated empty migrations
@@ -314,12 +310,12 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 			if len(cmds) != 1 {
 				return nil, errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement (convert to Computed[*sql.DB] for complex logic)", m.Base().Name)
 			}
-			if aerr := stmtcheck.AnalyzeTokens(ts); aerr != nil {
-				if errors.Is(aerr, stmtcheck.ErrDataAndDDL) {
-					return nil, errors.Wrapf(aerr, "validation failure for %s", m.Base().Name)
+			if err := stmtcheck.AnalyzeTokens(ts); err != nil { // shadow
+				if errors.Is(err, stmtcheck.ErrDataAndDDL) {
+					return nil, errors.Wrapf(err, "validation failure for %s", m.Base().Name)
 				}
-				if errors.Is(aerr, stmtcheck.ErrNonIdempotentDDL) {
-					return nil, errors.Wrapf(libschema.ErrNonIdempotentNonTx, "validation failure for %s: %v", m.Base().Name, aerr)
+				if errors.Is(err, stmtcheck.ErrNonIdempotentDDL) {
+					return nil, errors.Wrapf(libschema.ErrNonIdempotentNonTx, "validation failure for %s: %v", m.Base().Name, err)
 				}
 			}
 			lower := strings.ToLower(sqlText)
@@ -329,15 +325,15 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				}
 			}
 		}
-		res, execErr := execConn.ExecContext(ctx, sqlText)
-		if execErr != nil {
-			return nil, errors.Wrap(execErr, sqlText)
+		res, err = execConn.ExecContext(ctx, sqlText)
+		if err != nil {
+			return nil, errors.Wrap(err, sqlText)
 		}
 		return res, nil
 	}
 	if pm.computedAny != nil {
-		_, cErr := pm.computedAny(ctx, execConn)
-		return nil, cErr
+		_, err = pm.computedAny(ctx, execConn)
+		return nil, err
 	}
 	return nil, errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
 }

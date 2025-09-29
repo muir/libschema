@@ -18,6 +18,7 @@ import (
 )
 
 func TestOverrideNothing(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, &code2, nil)
@@ -27,6 +28,7 @@ func TestOverrideNothing(t *testing.T) {
 }
 
 func TestOverrideMigrateOnly(t *testing.T) {
+	t.Parallel()
 	var code string
 	assert.PanicsWithValue(t, "test exit: migrate only", func() {
 		_, _ = doConfigMigrate(t, nil, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
@@ -37,6 +39,7 @@ func TestOverrideMigrateOnly(t *testing.T) {
 }
 
 func TestOverrideMigrateDatabaseNotMatching(t *testing.T) {
+	t.Parallel()
 	var code string
 	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, nil, &libschema.OverrideOptions{
 		MigrateDatabase: "notmatching",
@@ -48,6 +51,7 @@ func TestOverrideMigrateDatabaseNotMatching(t *testing.T) {
 }
 
 func TestOverrideMigrateDatabaseMatching(t *testing.T) {
+	t.Parallel()
 	var code string
 	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
 		MigrateDatabase: "test",
@@ -57,6 +61,7 @@ func TestOverrideMigrateDatabaseMatching(t *testing.T) {
 }
 
 func TestOverrideMigrateDSNWithOneDatabase(t *testing.T) {
+	t.Parallel()
 	var code string
 	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
 		MigrateDSN: getDSN(t),
@@ -66,6 +71,7 @@ func TestOverrideMigrateDSNWithOneDatabase(t *testing.T) {
 }
 
 func TestOverrideMigrateDSNWithoutDatabase(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, &code2, &libschema.OverrideOptions{
@@ -79,6 +85,7 @@ func TestOverrideMigrateDSNWithoutDatabase(t *testing.T) {
 }
 
 func TestOverrideMigrateDSNWithDatabaseSpecified(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
@@ -91,6 +98,7 @@ func TestOverrideMigrateDSNWithDatabaseSpecified(t *testing.T) {
 }
 
 func TestOverrideNoMigrate(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
@@ -102,6 +110,7 @@ func TestOverrideNoMigrate(t *testing.T) {
 }
 
 func TestOverrideErrorIfMigrateNeeded(t *testing.T) {
+	t.Parallel()
 	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
 	t.Log("With ErrorIfMigrateNeeded: true we should get an error")
 	var code string
@@ -144,6 +153,7 @@ func TestOverrideErrorIfMigrateNeeded(t *testing.T) {
 }
 
 func TestOverrideEverythingSynchronous(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{

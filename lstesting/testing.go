@@ -34,8 +34,14 @@ func FakeSchema(t T, cascade string) (libschema.Options, func(db *sql.DB)) {
 			TrackingTable:  schemaName + ".tracking_table",
 			SchemaOverride: schemaName,
 		}, func(db *sql.DB) {
-			_, err := db.Exec(`DROP SCHEMA IF EXISTS ` + schemaName + ` ` + cascade)
-			t.Logf("DROPPED %s", schemaName)
-			assert.NoError(t, err, "drop schema")
+			if db != nil {
+				if err := db.Ping(); err != nil {
+					// database likely already closed; skip drop to avoid noisy errors
+					return
+				}
+				_, err := db.Exec(`DROP SCHEMA IF EXISTS ` + schemaName + ` ` + cascade)
+				t.Logf("DROPPED %s", schemaName)
+				assert.NoError(t, err, "drop schema")
+			}
 		}
 }

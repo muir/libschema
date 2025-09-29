@@ -34,6 +34,7 @@ LIBSCHEMA_POSTGRES_TEST_DSN="postgresql://lstestuser:lstestpass@localhost:5432/l
 */
 
 func TestPostgresMigrations(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_POSTGRES_TEST_DSN to test libschema/lspostgres")

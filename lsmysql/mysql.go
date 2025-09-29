@@ -242,9 +242,9 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 	}()
 
 	if pm.scriptAny != nil {
-		sqlText, sErr := pm.scriptAny(ctx, execConn)
-		if sErr != nil {
-			return nil, sErr
+		sqlText, err := pm.scriptAny(ctx, execConn)
+		if err != nil {
+			return nil, err
 		}
 		trim := strings.TrimSpace(sqlText)
 		if trim == "" {

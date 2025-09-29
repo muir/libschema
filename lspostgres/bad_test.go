@@ -16,6 +16,7 @@ import (
 )
 
 func TestBadMigrationsPostgres(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		substring string
