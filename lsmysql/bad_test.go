@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/memsql/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal/stmtcheck"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lspostgres"
 	"github.com/muir/libschema/lstesting"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestBadMigrationsMysql(t *testing.T) {

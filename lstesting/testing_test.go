@@ -3,8 +3,9 @@ package lstesting_test
 import (
 	"testing"
 
-	"github.com/muir/libschema/lstesting"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/muir/libschema/lstesting"
 )
 
 func TestRandomString(t *testing.T) {

@@ -6,11 +6,11 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lstesting"
-
-	"github.com/stretchr/testify/require"
 )
 
 // helper to open MySQL test DB or skip
@@ -74,9 +74,15 @@ func TestComputedInference(t *testing.T) {
 	dbase.Migrations("L1", cTx, cDB)
 	require.NoError(t, s.Migrate(context.Background()))
 
-	if !calledTx || !calledDB { panic("computed migrations not both invoked") }
-	if cTx.Base().NonTransactional() { panic("Computed[*sql.Tx] incorrectly inferred non-transactional") }
-	if !cDB.Base().NonTransactional() { panic("Computed[*sql.DB] did not infer non-transactional") }
+	if !calledTx || !calledDB {
+		panic("computed migrations not both invoked")
+	}
+	if cTx.Base().NonTransactional() {
+		panic("Computed[*sql.Tx] incorrectly inferred non-transactional")
+	}
+	if !cDB.Base().NonTransactional() {
+		panic("Computed[*sql.DB] did not infer non-transactional")
+	}
 }
 
 // TestForceOverride validates ForceTransactional / ForceNonTransactional override inference.
@@ -98,7 +104,13 @@ func TestForceOverride(t *testing.T) {
 	dbase.Migrations("L1", forcedTx, forcedNonTx, lastWins)
 	require.NoError(t, s.Migrate(context.Background()))
 
-	if forcedTx.Base().NonTransactional() { panic("ForceTransactional failed to override non-tx inference") }
-	if !forcedNonTx.Base().NonTransactional() { panic("ForceNonTransactional failed to override tx inference") }
-	if !lastWins.Base().NonTransactional() { panic("last override (ForceNonTransactional) did not win") }
+	if forcedTx.Base().NonTransactional() {
+		panic("ForceTransactional failed to override non-tx inference")
+	}
+	if !forcedNonTx.Base().NonTransactional() {
+		panic("ForceNonTransactional failed to override tx inference")
+	}
+	if !lastWins.Base().NonTransactional() {
+		panic("last override (ForceNonTransactional) did not win")
+	}
 }

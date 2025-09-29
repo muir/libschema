@@ -2,8 +2,9 @@ package lsmysql
 
 import (
 	"github.com/memsql/errors"
-	"github.com/muir/libschema/internal/stmtcheck"
 	"github.com/muir/sqltoken"
+
+	"github.com/muir/libschema/internal/stmtcheck"
 )
 
 var (

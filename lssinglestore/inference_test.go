@@ -6,11 +6,11 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lssinglestore"
 	"github.com/muir/libschema/lstesting"
-
-	"github.com/stretchr/testify/require"
 )
 
 func openSingleStore(t *testing.T) *sql.DB {
@@ -40,8 +40,12 @@ func TestGenerateInference(t *testing.T) {
 
 	dbase.Migrations("L1", mTx, mDB)
 	require.NoError(t, s.Migrate(context.Background()))
-	if mTx.Base().NonTransactional() { panic("Generate[*sql.Tx] incorrectly inferred non-tx (SingleStore)") }
-	if !mDB.Base().NonTransactional() { panic("Generate[*sql.DB] did not infer non-tx (SingleStore)") }
+	if mTx.Base().NonTransactional() {
+		panic("Generate[*sql.Tx] incorrectly inferred non-tx (SingleStore)")
+	}
+	if !mDB.Base().NonTransactional() {
+		panic("Generate[*sql.DB] did not infer non-tx (SingleStore)")
+	}
 }
 
 func TestComputedInference(t *testing.T) {
@@ -61,9 +65,15 @@ func TestComputedInference(t *testing.T) {
 
 	dbase.Migrations("L1", cTx, cDB)
 	require.NoError(t, s.Migrate(context.Background()))
-	if !calledTx || !calledDB { panic("computed migrations not both invoked (SingleStore)") }
-	if cTx.Base().NonTransactional() { panic("Computed[*sql.Tx] incorrectly inferred non-tx (SingleStore)") }
-	if !cDB.Base().NonTransactional() { panic("Computed[*sql.DB] did not infer non-tx (SingleStore)") }
+	if !calledTx || !calledDB {
+		panic("computed migrations not both invoked (SingleStore)")
+	}
+	if cTx.Base().NonTransactional() {
+		panic("Computed[*sql.Tx] incorrectly inferred non-tx (SingleStore)")
+	}
+	if !cDB.Base().NonTransactional() {
+		panic("Computed[*sql.DB] did not infer non-tx (SingleStore)")
+	}
 }
 
 func TestForceOverride(t *testing.T) {
@@ -82,7 +92,13 @@ func TestForceOverride(t *testing.T) {
 
 	dbase.Migrations("L1", forcedTx, forcedNonTx, lastWins)
 	require.NoError(t, s.Migrate(context.Background()))
-	if forcedTx.Base().NonTransactional() { panic("ForceTransactional failed (SingleStore)") }
-	if !forcedNonTx.Base().NonTransactional() { panic("ForceNonTransactional failed (SingleStore)") }
-	if !lastWins.Base().NonTransactional() { panic("last override did not win (SingleStore)") }
+	if forcedTx.Base().NonTransactional() {
+		panic("ForceTransactional failed (SingleStore)")
+	}
+	if !forcedNonTx.Base().NonTransactional() {
+		panic("ForceNonTransactional failed (SingleStore)")
+	}
+	if !lastWins.Base().NonTransactional() {
+		panic("last override did not win (SingleStore)")
+	}
 }

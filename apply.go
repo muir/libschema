@@ -5,11 +5,11 @@ import (
 	"log"
 	"os"
 
-	"github.com/muir/libschema/internal"
-
 	"github.com/hashicorp/go-multierror"
 	"github.com/memsql/errors"
+
 	"github.com/muir/libschema/dgorder"
+	"github.com/muir/libschema/internal"
 )
 
 // Migrate runs pending migrations that have been registered as long as

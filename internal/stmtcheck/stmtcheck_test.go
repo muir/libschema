@@ -1,6 +1,7 @@
 package stmtcheck
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/muir/sqltoken"
@@ -16,14 +17,14 @@ func TestAnalyzeTokens_DataAndDDL(t *testing.T) {
 	ts := mustTokenizeMySQL(t, `CREATE TABLE t1 (id int); INSERT INTO t1 (id) VALUES (1)`)
 	err := AnalyzeTokens(ts)
 	require.Error(t, err)
-	require.True(t, IsDataAndDDL(err), "expected ErrDataAndDDL sentinel")
+	require.True(t, errors.Is(err, ErrDataAndDDL), "expected ErrDataAndDDL sentinel")
 }
 
 func TestAnalyzeTokens_NonIdempotentDDL(t *testing.T) {
 	ts := mustTokenizeMySQL(t, `CREATE TABLE t1 (id int)`)
 	err := AnalyzeTokens(ts)
 	require.Error(t, err)
-	require.True(t, IsNonIdempotentDDL(err), "expected ErrNonIdempotentDDL sentinel")
+	require.True(t, errors.Is(err, ErrNonIdempotentDDL), "expected ErrNonIdempotentDDL sentinel")
 }
 
 func TestAnalyzeTokens_IdempotentDDLAllowed(t *testing.T) {

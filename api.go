@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/muir/libschema/internal"
-
 	"github.com/memsql/errors"
+
+	"github.com/muir/libschema/internal"
 )
 
 const DefaultTrackingTable = "libschema.migration_status"
@@ -191,16 +191,26 @@ func Asynchronous() MigrationOption {
 	}
 }
 
-// RepeatUntilNoOp marks a migration as potentially being needed to run multiple times.
-// It will run over and over until the database reports that the migration
-// modified no rows.  This can useuflly be combined with Asychnronous.
+// RepeatUntilNoOp marks a migration (Script or Generate) to be re‑executed until
+// the underlying driver reports zero rows affected. Use it for single, pure DML
+// statements that progressively transform data (e.g. UPDATE batches that move a
+// limited subset each run). It is NOT a generic looping primitive.
 //
-// This marking only applies to Script() and Generated() migrations.  The migration
-// must be a single statement.
+// Safety / correctness guidelines:
+//   - Single statement only – multi‑statement scripts can give a meaningless final RowsAffected().
+//   - DML only – avoid DDL (CREATE/ALTER/DROP/REFRESH) or utility commands; most return 0 and will
+//     terminate immediately or loop uselessly.
+//   - Idempotent per batch – repeating the same statement after partial success must not corrupt data.
+//   - Do NOT mix with non‑transactional Postgres DDL (concurrent index builds, REFRESH MATERIALIZED VIEW CONCURRENTLY).
+//   - If logic needs conditionals or multiple statements, write a Computed migration and loop explicitly.
 //
-// For Computed() migrations, do not use RepeatUntilNoOp.  Instead simply write the
-// migration use Driver.DB() to get a database handle and use it to do many little
-// transactions, each one modifying a few rows until there is no more work to do.
+// Prefer a Computed migration when:
+//   - You need to run multiple statements per batch
+//   - You must inspect progress with custom queries
+//   - RowsAffected() is unreliable or driver‑dependent
+//
+// Future note: libschema may emit debug warnings for obviously unreliable usages
+// (e.g. DDL + RepeatUntilNoOp). Treat the above bullets as normative behavior now.
 func RepeatUntilNoOp() MigrationOption {
 	return func(m Migration) {
 		m.Base().repeatUntilNoOp = true
@@ -301,7 +311,6 @@ func (m *MigrationBase) NonTransactional() bool {
 	return m.nonTransactional
 }
 
-// SetNonTransactional marks a migration as non-transactional. Intended for driver generic helpers.
 func (m *MigrationBase) SetNonTransactional(v bool) {
 	m.nonTransactional = v
 }

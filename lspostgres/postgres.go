@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/muir/libschema"
-	"github.com/muir/libschema/internal"
-	"github.com/muir/libschema/internal/stmtcheck"
-
 	"github.com/lib/pq"
 	"github.com/memsql/errors"
 	"github.com/muir/sqltoken"
+
+	"github.com/muir/libschema"
+	"github.com/muir/libschema/internal"
+	"github.com/muir/libschema/internal/stmtcheck"
 )
 
 // Postgres is a libschema.Driver for connecting to Postgres-like databases that
@@ -315,10 +315,10 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				return nil, errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement (convert to Computed[*sql.DB] for complex logic)", m.Base().Name)
 			}
 			if aerr := stmtcheck.AnalyzeTokens(ts); aerr != nil {
-				if stmtcheck.IsDataAndDDL(aerr) {
+				if errors.Is(aerr, stmtcheck.ErrDataAndDDL) {
 					return nil, errors.Wrapf(aerr, "validation failure for %s", m.Base().Name)
 				}
-				if stmtcheck.IsNonIdempotentDDL(aerr) {
+				if errors.Is(aerr, stmtcheck.ErrNonIdempotentDDL) {
 					return nil, errors.Wrapf(libschema.ErrNonIdempotentNonTx, "validation failure for %s: %v", m.Base().Name, aerr)
 				}
 			}

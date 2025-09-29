@@ -52,8 +52,6 @@ func classify(cmd sqltoken.Tokens) CommandClassification {
 
 // AnalyzeTokens inspects tokenized SQL (already produced for specific dialect) and returns
 // either nil or a wrapped error containing ErrDataAndDDL / ErrNonIdempotentDDL.
-// It mirrors the previous MySQL CheckScript behavior but is dialect-neutral because the
-// sqltoken tokenizer was dialect-specific earlier.
 func AnalyzeTokens(ts sqltoken.Tokens) error {
 	var seenDDL, seenData, nonIdempotent string
 	for _, stmt := range ts.Strip().CmdSplit() {
@@ -76,7 +74,3 @@ func AnalyzeTokens(ts sqltoken.Tokens) error {
 	}
 	return nil
 }
-
-// Exposed error helpers for callers performing errors.Is checks.
-func IsDataAndDDL(err error) bool       { return errors.Is(err, ErrDataAndDDL) }
-func IsNonIdempotentDDL(err error) bool { return errors.Is(err, ErrNonIdempotentDDL) }

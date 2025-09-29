@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/muir/libschema"
-	"github.com/muir/libschema/internal"
+	"github.com/memsql/errors"
 	"github.com/muir/sqltoken"
 
-	"github.com/memsql/errors"
+	"github.com/muir/libschema"
+	"github.com/muir/libschema/internal"
 )
 
 // MySQL is a libschema.Driver for connecting to MySQL-like databases that

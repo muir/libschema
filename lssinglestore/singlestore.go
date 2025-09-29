@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/memsql/errors"
+
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/lsmysql"
-
-	"github.com/memsql/errors"
 )
 
 // SingleStore is a libschema.Driver for connecting to SingleStore databases.
