@@ -139,6 +139,10 @@ func Generate[T ExecConn](name string, generator func(context.Context, T) string
 	for _, opt := range opts {
 		opt(m)
 	}
+	if isTx == pm.MigrationBase.NonTransactional() {
+		panic(errors.Errorf("Generate[%s] migration %s has inconsistent transactional override (generic implies %s)",
+			fmt.Sprintf("%T", z), name, ternary(isTx, "transactional", "non-transactional")))
+	}
 	return m
 }
 
@@ -162,7 +166,19 @@ func Computed[T ExecConn](name string, action func(context.Context, T) error, op
 	for _, opt := range opts {
 		opt(m)
 	}
+	if isTx == pm.MigrationBase.NonTransactional() {
+		panic(errors.Errorf("Computed[%s] migration %s has inconsistent transactional override (generic implies %s)",
+			fmt.Sprintf("%T", z), name, ternary(isTx, "transactional", "non-transactional")))
+	}
 	return m
+}
+
+// ternary small helper for concise error formatting parity with Postgres driver.
+func ternary[T any](cond bool, a, b T) T {
+	if cond {
+		return a
+	}
+	return b
 }
 
 // DoOneMigration applies a single migration.
