@@ -182,8 +182,6 @@ func Generate[T ConnPtr](name string, generator func(context.Context, T) string,
 		mustBeNonTransactional = true
 		pm.MigrationBase.SetNonTransactional(true)
 		pm.scriptDB = func(ctx context.Context, db *sql.DB) (string, error) { return generator(ctx, any(db).(T)), nil }
-	default:
-		pm.creationErr = errors.Errorf("Generate migration %s unsupported generic type %T", name, zero)
 	}
 	lsm := libschema.Migration(pm)
 	for _, opt := range opts {
@@ -208,8 +206,6 @@ func Computed[T ConnPtr](name string, action func(context.Context, T) error, opt
 	case *sql.DB:
 		pm.MigrationBase.SetNonTransactional(true)
 		pm.computedDB = func(ctx context.Context, db *sql.DB) error { return action(ctx, any(db).(T)) }
-	default:
-		pm.creationErr = errors.Errorf("Computed migration %s unsupported generic type %T", name, zero)
 	}
 	lsm := libschema.Migration(pm)
 	for _, opt := range opts {
@@ -318,7 +314,11 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 			return
 		}
 		if done && err == nil {
+			// Successful migration (non-transactional or after failure path recovery)
 			m.Base().SetStatus(libschema.MigrationStatus{Done: true})
+		} else if !done && err != nil {
+			// Record failure in in-memory status so callers/tests can inspect Error without reloading from DB.
+			m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()})
 		}
 	}()
 

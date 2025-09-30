@@ -3,9 +3,11 @@ package lspostgres_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -187,4 +189,109 @@ func TestPostgresMigrations(t *testing.T) {
 		"MIGRATE: G3",
 		"COMPLETE",
 	}, actions)
+}
+
+// TestGenerateDBInference ensures Generate[*sql.DB] is inferred non-transactional and executes.
+func TestGenerateDBInference(t *testing.T) {
+	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_POSTGRES_TEST_DSN to test libschema/lspostgres")
+	}
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx := context.Background()
+	s := libschema.New(ctx, libschema.Options{})
+	log := libschema.LogFromLog(t)
+	dbase, err := lspostgres.New(log, "test_gen_db", s, db)
+	require.NoError(t, err)
+
+	// Table setup transactional migration for context
+	lib := fmt.Sprintf("%s_%d", t.Name(), time.Now().UnixNano())
+	setup := lspostgres.Script("SETUP_"+lib, "CREATE TABLE IF NOT EXISTS gen_db_inf (id int)")
+	// Non-transactional generation (uses *sql.DB) inserts a row
+	gen := lspostgres.Generate[*sql.DB]("GEN_DB_"+lib, func(_ context.Context, _ *sql.DB) string { return "INSERT INTO gen_db_inf (id) VALUES (1)" })
+	dbase.Migrations(lib, setup, gen)
+	require.NoError(t, s.Migrate(ctx))
+	if !gen.Base().NonTransactional() {
+		t.Fatalf("Generate[*sql.DB] should be non-transactional")
+	}
+}
+
+// TestComputedDBInference ensures Computed[*sql.DB] is inferred non-transactional and runs logic.
+func TestComputedDBInference(t *testing.T) {
+	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_POSTGRES_TEST_DSN to test libschema/lspostgres")
+	}
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx := context.Background()
+	s := libschema.New(ctx, libschema.Options{})
+	log := libschema.LogFromLog(t)
+	dbase, err := lspostgres.New(log, "test_comp_db", s, db)
+	require.NoError(t, err)
+
+	ran := false
+	lib := fmt.Sprintf("%s_%d", t.Name(), time.Now().UnixNano())
+	comp := lspostgres.Computed[*sql.DB]("COMP_DB_"+lib, func(_ context.Context, db2 *sql.DB) error {
+		if _, e := db2.Exec("CREATE TABLE IF NOT EXISTS comp_db_inf (id int)"); e != nil {
+			return e
+		}
+		_, e := db2.Exec("INSERT INTO comp_db_inf (id) VALUES (2)")
+		if e == nil {
+			ran = true
+		}
+		return e
+	})
+	dbase.Migrations(lib, comp)
+	require.NoError(t, s.Migrate(ctx))
+	if !comp.Base().NonTransactional() {
+		t.Fatalf("Computed[*sql.DB] should be non-transactional")
+	}
+	if !ran {
+		t.Fatalf("computed function body did not run")
+	}
+}
+
+// TestComputedFailure ensures a computed migration that returns an error surfaces it and records failure.
+func TestComputedFailure(t *testing.T) {
+	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_POSTGRES_TEST_DSN to test libschema/lspostgres")
+	}
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx := context.Background()
+	opts := libschema.Options{}
+	s := libschema.New(ctx, opts)
+	log := libschema.LogFromLog(t)
+	dbase, err := lspostgres.New(log, "test_computed_fail", s, db)
+	require.NoError(t, err)
+
+	lib := fmt.Sprintf("FAIL_%d", time.Now().UnixNano())
+	failErr := errors.New("boom-fail")
+	bad := lspostgres.Computed("BAD", func(_ context.Context, _ *sql.Tx) error { return failErr })
+	dbase.Migrations(lib, bad)
+	err = s.Migrate(ctx)
+	if err == nil {
+		t.Fatalf("expected migration failure error, got nil")
+	}
+	// Lookup the stored migration (Database.Migrations makes a copy)
+	stored, ok := dbase.Lookup(libschema.MigrationName{Library: lib, Name: "BAD"})
+	if !ok {
+		t.Fatalf("could not lookup stored migration copy")
+	}
+	st := stored.Base().Status()
+	if st.Done {
+		t.Fatalf("expected migration not marked done after failure")
+	}
+	if st.Error == "" {
+		t.Fatalf("expected error message recorded; got empty status: %+v", st)
+	}
 }

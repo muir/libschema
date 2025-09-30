@@ -143,8 +143,6 @@ func Generate[T ConnPtr](name string, generator func(context.Context, T) string,
 		expectedTx = false
 		pm.scriptDB = func(ctx context.Context, db *sql.DB) (string, error) { return generator(ctx, any(db).(T)), nil }
 		pm.SetNonTransactional(true)
-	default:
-		pm.creationErr = errors.Errorf("Generate migration %s unsupported generic type %T", name, zero)
 	}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
@@ -177,8 +175,6 @@ func Computed[T ConnPtr](name string, action func(context.Context, T) error, opt
 		expectedTx = false
 		pm.computedDB = func(ctx context.Context, db *sql.DB) error { return action(ctx, any(db).(T)) }
 		pm.SetNonTransactional(true)
-	default:
-		pm.creationErr = errors.Errorf("Computed migration %s unsupported generic type %T", name, zero)
 	}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
@@ -278,6 +274,8 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 		}
 		if done && err == nil {
 			m.Base().SetStatus(libschema.MigrationStatus{Done: true})
+		} else if !done && err != nil {
+			m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()})
 		}
 	}()
 
