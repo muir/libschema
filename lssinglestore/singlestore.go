@@ -70,11 +70,11 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 	return lsmysql.Script(name, sqlText, opts...)
 }
 
-func Generate[T lsmysql.ExecConn](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
+func Generate[T lsmysql.ConnPtr](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
 	return lsmysql.Generate[T](name, generator, opts...)
 }
 
-func Computed[T lsmysql.ExecConn](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
+func Computed[T lsmysql.ConnPtr](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
 	return lsmysql.Computed[T](name, action, opts...)
 }
 

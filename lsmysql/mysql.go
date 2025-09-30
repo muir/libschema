@@ -84,26 +84,32 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB,
 }
 
 // ExecConn provides the minimal surface common to *sql.DB and *sql.Tx used by MySQL migrations.
+// ExecConn & TxLike kept for external parity (exported via libschema); internal
+// generic constraint uses ConnPtr only for *sql.Tx | *sql.DB to avoid broad assertions.
 type ExecConn interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
-
-// TxLike is implemented by *sql.Tx; presence indicates transactional scope.
 type TxLike interface {
 	Commit() error
 	Rollback() error
 }
 
+// ConnPtr restricts generic migrations to concrete *sql.Tx or *sql.DB.
+type ConnPtr interface{ *sql.Tx | *sql.DB }
+
 type mmigration struct {
 	libschema.MigrationBase
-	scriptAny   func(context.Context, ExecConn) (string, error)
-	computedAny func(context.Context, ExecConn) (bool, error)
+	scriptTx    func(context.Context, *sql.Tx) (string, error)
+	scriptDB    func(context.Context, *sql.DB) (string, error)
+	computedTx  func(context.Context, *sql.Tx) error
+	computedDB  func(context.Context, *sql.DB) error
+	creationErr error
 }
 
 func (m *mmigration) Copy() libschema.Migration {
-	return &mmigration{MigrationBase: m.MigrationBase.Copy(), scriptAny: m.scriptAny, computedAny: m.computedAny}
+	return &mmigration{MigrationBase: m.MigrationBase.Copy(), scriptTx: m.scriptTx, scriptDB: m.scriptDB, computedTx: m.computedTx, computedDB: m.computedDB, creationErr: m.creationErr}
 }
 func (m *mmigration) Base() *libschema.MigrationBase { return &m.MigrationBase }
 
@@ -111,64 +117,83 @@ func (m *mmigration) Base() *libschema.MigrationBase { return &m.MigrationBase }
 // unless overridden with ForceNonTransactional().
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
-	pm.scriptAny = func(_ context.Context, _ ExecConn) (string, error) { return sqlText, nil }
+	// Always transactional unless overridden explicitly
+	pm.scriptTx = func(_ context.Context, _ *sql.Tx) (string, error) { return sqlText, nil }
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(m)
+	}
+	// After options, if NonTransactional true switch to DB variant
+	if m.Base().NonTransactional() {
+		pm.scriptDB = func(_ context.Context, _ *sql.DB) (string, error) { return sqlText, nil }
+		pm.scriptTx = nil
 	}
 	return m
 }
 
 // Generate defines a migration returning a SQL string. If T implements TxLike it's transactional else non-transactional.
-func Generate[T ExecConn](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
-	var z T
-	_, isTx := any(z).(TxLike)
+func Generate[T ConnPtr](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
+	var zero T
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
-	pm.scriptAny = func(ctx context.Context, ec ExecConn) (string, error) {
-		v, ok := ec.(T)
-		if !ok {
-			return "", errors.Errorf("script migration %s connection type mismatch", name)
-		}
-		return generator(ctx, v), nil
-	}
-	if !isTx {
-		//nolint:staticcheck // QF1008: keep explicit embedded field qualifier for clarity
-		pm.MigrationBase.SetNonTransactional(true)
+	expectedTx := true
+	switch any(zero).(type) {
+	case *sql.Tx:
+		pm.scriptTx = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, any(tx).(T)), nil }
+	case *sql.DB:
+		expectedTx = false
+		pm.scriptDB = func(ctx context.Context, db *sql.DB) (string, error) { return generator(ctx, any(db).(T)), nil }
+		pm.SetNonTransactional(true)
+	default:
+		pm.creationErr = errors.Errorf("Generate migration %s unsupported generic type %T", name, zero)
 	}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(m)
 	}
-	if isTx == pm.MigrationBase.NonTransactional() {
-		panic(errors.Errorf("Generate[%s] migration %s has inconsistent transactional override (generic implies %s)",
-			fmt.Sprintf("%T", z), name, ternary(isTx, "transactional", "non-transactional")))
+	finalTx := !m.Base().NonTransactional()
+	if expectedTx != finalTx && pm.creationErr == nil {
+		pm.creationErr = errors.Errorf("Generate[%T] %s transactional override mismatch (expected %s)", zero, name, ternary(expectedTx, "transactional", "non-transactional"))
+	}
+	// Normalize function to final mode after options
+	if m.Base().NonTransactional() && pm.scriptDB == nil && pm.creationErr == nil {
+		pm.scriptDB = func(ctx context.Context, db *sql.DB) (string, error) { return generator(ctx, any(db).(T)), nil }
+		pm.scriptTx = nil
+	} else if !m.Base().NonTransactional() && pm.scriptTx == nil && pm.creationErr == nil {
+		pm.scriptTx = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, any(tx).(T)), nil }
+		pm.scriptDB = nil
 	}
 	return m
 }
 
 // Computed defines a migration that runs arbitrary Go code.
-func Computed[T ExecConn](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
-	var z T
-	_, isTx := any(z).(TxLike)
+func Computed[T ConnPtr](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
+	var zero T
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
-	pm.computedAny = func(ctx context.Context, ec ExecConn) (bool, error) {
-		v, ok := ec.(T)
-		if !ok {
-			return false, errors.Errorf("computed migration %s connection type mismatch", name)
-		}
-		return true, action(ctx, v)
-	}
-	if !isTx {
-		//nolint:staticcheck // QF1008: keep explicit embedded field qualifier for clarity
-		pm.MigrationBase.SetNonTransactional(true)
+	expectedTx := true
+	switch any(zero).(type) {
+	case *sql.Tx:
+		pm.computedTx = func(ctx context.Context, tx *sql.Tx) error { return action(ctx, any(tx).(T)) }
+	case *sql.DB:
+		expectedTx = false
+		pm.computedDB = func(ctx context.Context, db *sql.DB) error { return action(ctx, any(db).(T)) }
+		pm.SetNonTransactional(true)
+	default:
+		pm.creationErr = errors.Errorf("Computed migration %s unsupported generic type %T", name, zero)
 	}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(m)
 	}
-	if isTx == pm.MigrationBase.NonTransactional() {
-		panic(errors.Errorf("Computed[%s] migration %s has inconsistent transactional override (generic implies %s)",
-			fmt.Sprintf("%T", z), name, ternary(isTx, "transactional", "non-transactional")))
+	finalTx := !m.Base().NonTransactional()
+	if expectedTx != finalTx && pm.creationErr == nil {
+		pm.creationErr = errors.Errorf("Computed[%T] %s transactional override mismatch (expected %s)", zero, name, ternary(expectedTx, "transactional", "non-transactional"))
+	}
+	if m.Base().NonTransactional() && pm.computedDB == nil && pm.creationErr == nil {
+		pm.computedDB = func(ctx context.Context, db *sql.DB) error { return action(ctx, any(db).(T)) }
+		pm.computedTx = nil
+	} else if !m.Base().NonTransactional() && pm.computedTx == nil && pm.creationErr == nil {
+		pm.computedTx = func(ctx context.Context, tx *sql.Tx) error { return action(ctx, any(tx).(T)) }
+		pm.computedDB = nil
 	}
 	return m
 }
@@ -187,14 +212,15 @@ func ternary[T any](cond bool, a, b T) T {
 // in types that embed MySQL.
 func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (res sql.Result, err error) {
 	pm := m.(*mmigration)
+	if pm.creationErr != nil {
+		return nil, pm.creationErr
+	}
 	runTransactional := !m.Base().NonTransactional()
 	var tx *sql.Tx
-	var execConn ExecConn
 	if runTransactional {
 		if tx, err = d.DB().BeginTx(ctx, d.Options.MigrationTxOptions); err != nil {
 			return nil, errors.Wrapf(err, "begin Tx for migration %s", m.Base().Name)
 		}
-		execConn = tx
 		if d.Options.SchemaOverride != "" {
 			if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
 				return nil, errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
@@ -204,8 +230,6 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				return nil, errors.Wrapf(err2, "set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 			}
 		}
-	} else {
-		execConn = d.DB()
 	}
 	defer func() {
 		done := err == nil
@@ -257,34 +281,50 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 		}
 	}()
 
-	if pm.scriptAny != nil {
-		sqlText, err := pm.scriptAny(ctx, execConn)
+	if pm.scriptTx != nil || pm.scriptDB != nil {
+		var sqlText string
+		if runTransactional && pm.scriptTx != nil {
+			sqlText, err = pm.scriptTx(ctx, tx)
+		} else if !runTransactional && pm.scriptDB != nil {
+			sqlText, err = pm.scriptDB(ctx, d.DB())
+		} else if pm.creationErr != nil { // safety
+			return nil, pm.creationErr
+		} else {
+			return nil, errors.Errorf("migration %s transactional mode mismatch", m.Base().Name)
+		}
 		if err != nil {
 			return nil, err
 		}
-		trim := strings.TrimSpace(sqlText)
-		if trim == "" {
+		if strings.TrimSpace(sqlText) == "" {
 			return nil, nil
 		}
-		// Basic validation (reuse existing CheckScript logic) for transactional scripts only; for non-tx path also okay.
 		if runTransactional {
 			if err = CheckScript(sqlText); err != nil {
 				return nil, errors.Wrap(err, sqlText)
 			}
+		} else {
+			_ = sqltoken.TokenizeMySQL(sqlText) // placeholder for symmetry with Postgres classification tests
 		}
-		// Non-transactional path: optionally we could split multiple statements; mimic old behavior by executing as-is.
-		if !runTransactional {
-			// Rough multi-statement guard for future parity (optional). For now allow multiples similar to previous driver behavior.
-			_ = sqltoken.TokenizeMySQL(sqlText) // placeholder to show parity readiness
+		if runTransactional {
+			res, err = tx.ExecContext(ctx, sqlText)
+		} else {
+			res, err = d.DB().ExecContext(ctx, sqlText)
 		}
-		res, err = execConn.ExecContext(ctx, sqlText)
 		if err != nil {
 			return nil, errors.Wrap(err, sqlText)
 		}
 		return res, nil
 	}
-	if pm.computedAny != nil {
-		_, err = pm.computedAny(ctx, execConn)
+	if pm.computedTx != nil || pm.computedDB != nil {
+		if runTransactional && pm.computedTx != nil {
+			err = pm.computedTx(ctx, tx)
+		} else if !runTransactional && pm.computedDB != nil {
+			err = pm.computedDB(ctx, d.DB())
+		} else if pm.creationErr != nil { // safety
+			return nil, pm.creationErr
+		} else {
+			return nil, errors.Errorf("computed migration %s transactional mode mismatch", m.Base().Name)
+		}
 		return nil, err
 	}
 	return nil, errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
