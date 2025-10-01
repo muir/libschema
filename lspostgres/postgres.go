@@ -180,7 +180,7 @@ func Generate[T ConnPtr](name string, generator func(context.Context, T) string,
 		pm.scriptTx = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, any(tx).(T)), nil }
 	case *sql.DB:
 		mustBeNonTransactional = true
-		pm.MigrationBase.SetNonTransactional(true)
+		pm.MigrationBase.SetNonTransactional(true) //nolint:staticcheck // QF1008: keep explicit for clarity and grepability
 		pm.scriptDB = func(ctx context.Context, db *sql.DB) (string, error) { return generator(ctx, any(db).(T)), nil }
 	}
 	lsm := libschema.Migration(pm)
@@ -204,7 +204,7 @@ func Computed[T ConnPtr](name string, action func(context.Context, T) error, opt
 	case *sql.Tx:
 		pm.computedTx = func(ctx context.Context, tx *sql.Tx) error { return action(ctx, any(tx).(T)) }
 	case *sql.DB:
-		pm.MigrationBase.SetNonTransactional(true)
+		pm.MigrationBase.SetNonTransactional(true) //nolint:staticcheck // QF1008: intentional explicit embedded field reference
 		pm.computedDB = func(ctx context.Context, db *sql.DB) error { return action(ctx, any(db).(T)) }
 	}
 	lsm := libschema.Migration(pm)
