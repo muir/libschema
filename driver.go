@@ -2,8 +2,9 @@ package libschema
 
 import (
 	"database/sql"
-	"fmt"
 	"strings"
+
+	"github.com/memsql/errors"
 )
 
 // maps from DSN to driver name
@@ -22,7 +23,7 @@ func OpenAnyDB(dsn string) (*sql.DB, error) {
 				return sql.Open(driver, dsn)
 			}
 		}
-		return nil, fmt.Errorf("could not find database driver matching %s", wanted)
+		return nil, errors.Errorf("could not find database driver matching %s", wanted)
 	}
-	return nil, fmt.Errorf("could not find appropriate database driver for DSN")
+	return nil, errors.Errorf("could not find appropriate database driver for DSN")
 }

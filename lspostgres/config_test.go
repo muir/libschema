@@ -3,13 +3,14 @@ package lspostgres_test
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/memsql/errors"
 
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"
@@ -176,7 +177,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 	internal.TestingMode = true // panic instead of os.Exit()
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open: %w", err)
+		return nil, errors.Wrap(err, "open")
 	}
 	defer func() {
 		if options == nil {
@@ -218,7 +219,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 
 		dbase2, err := lspostgres.New(libschema.LogFromLog(t), "test2", s, db)
 		if err != nil {
-			return db, fmt.Errorf("new2: %w", err)
+			return db, errors.Wrap(err, "new2")
 		}
 		dbase2.Options.OnMigrationsComplete = nil
 
@@ -233,7 +234,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 
 	dbase, err := lspostgres.New(libschema.LogFromLog(t), "test", s, db)
 	if err != nil {
-		return db, fmt.Errorf("new: %w", err)
+		return db, errors.Wrap(err, "new")
 	}
 
 	require.NotNil(t, dbase.Options.OnMigrationsComplete)
@@ -268,7 +269,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 	t.Log("migrate!")
 	err = s.Migrate(context.Background())
 	if err != nil {
-		return db, fmt.Errorf("migrate: %w", err)
+		return db, errors.Wrap(err, "migrate")
 	}
 
 	close(migrateReturned)

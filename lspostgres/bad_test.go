@@ -2,12 +2,13 @@ package lspostgres_test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/memsql/errors"
 
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lsmysql"
@@ -58,7 +59,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 				dbase.Migrations("L2",
 					lspostgres.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`,
 						libschema.SkipIf(func() (bool, error) {
-							return false, fmt.Errorf("oops")
+							return false, errors.Errorf("oops")
 						})),
 				)
 			},

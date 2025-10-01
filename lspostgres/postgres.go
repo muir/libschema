@@ -557,7 +557,7 @@ func (p *Postgres) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema
 func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ *internal.Log, migration libschema.Migration) error {
 	m, ok := migration.(*pmigration)
 	if !ok {
-		return fmt.Errorf("non-postgres migration %s registered with postgres migrations", migration.Base().Name)
+		return errors.Errorf("non-postgres migration %s registered with postgres migrations", migration.Base().Name)
 	}
 	if m.scriptTx != nil || m.scriptDB != nil || m.computedTx != nil || m.computedDB != nil {
 		return nil

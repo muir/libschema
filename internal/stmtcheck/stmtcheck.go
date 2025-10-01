@@ -1,7 +1,6 @@
 package stmtcheck
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 
@@ -67,10 +66,10 @@ func AnalyzeTokens(ts sqltoken.Tokens) error {
 		}
 	}
 	if seenDDL != "" && seenData != "" {
-		return fmt.Errorf("data command '%s' combined with DDL command '%s': %w", seenData, seenDDL, ErrDataAndDDL)
+		return errors.Errorf("data command '%s' combined with DDL command '%s': %w", seenData, seenDDL, ErrDataAndDDL)
 	}
 	if nonIdempotent != "" {
-		return fmt.Errorf("non-idempotent DDL '%s': %w", nonIdempotent, ErrNonIdempotentDDL)
+		return errors.Errorf("non-idempotent DDL '%s': %w", nonIdempotent, ErrNonIdempotentDDL)
 	}
 	return nil
 }

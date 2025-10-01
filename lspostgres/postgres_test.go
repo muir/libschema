@@ -3,12 +3,12 @@ package lspostgres_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/memsql/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

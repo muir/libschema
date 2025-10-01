@@ -578,7 +578,7 @@ func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Da
 // in types that embed MySQL.
 func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ *internal.Log, migration libschema.Migration) error {
 	if _, ok := migration.(*mmigration); !ok {
-		return fmt.Errorf("non-mysql migration %s registered with mysql migrations", migration.Base().Name)
+		return errors.Errorf("non-mysql migration %s registered with mysql migrations", migration.Base().Name)
 	}
 	// All mmigration instances are supported; body presence checked at execution.
 	return nil
