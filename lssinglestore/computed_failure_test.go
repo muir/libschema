@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/memsql/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/muir/libschema"
@@ -16,10 +17,12 @@ import (
 // TestComputedFailure ensures a transactional computed SingleStore migration records failure status.
 func TestComputedFailure(t *testing.T) {
 	dsn := os.Getenv("LIBSCHEMA_SINGLESTORE_TEST_DSN")
-	if dsn == "" { t.Skip("Set $LIBSCHEMA_SINGLESTORE_TEST_DSN to test libschema/lssinglestore") }
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_SINGLESTORE_TEST_DSN to test libschema/lssinglestore")
+	}
 	db, err := sql.Open("mysql", dsn)
 	require.NoError(t, err)
-	t.Cleanup(func(){ _ = db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	ctx := context.Background()
 	opts := libschema.Options{}
@@ -33,10 +36,10 @@ func TestComputedFailure(t *testing.T) {
 	mig := Computed("BAD", func(_ context.Context, _ *sql.Tx) error { return failErr })
 	dbase.Migrations(lib, mig)
 	err = s.Migrate(ctx)
-	if err == nil { t.Fatalf("expected migration failure error, got nil") }
+	require.Error(t, err, "expected migration failure error")
 	stored, ok := dbase.Lookup(libschema.MigrationName{Library: lib, Name: "BAD"})
-	if !ok { t.Fatalf("could not lookup stored migration copy") }
+	require.True(t, ok, "could not lookup stored migration copy")
 	st := stored.Base().Status()
-	if st.Done { t.Fatalf("expected migration not marked done after failure") }
-	if st.Error == "" { t.Fatalf("expected error message recorded; got empty status: %+v", st) }
+	assert.False(t, st.Done, "expected migration not marked done after failure")
+	assert.NotEmpty(t, st.Error, "expected error message recorded; got empty status: %+v", st)
 }

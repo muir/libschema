@@ -169,20 +169,15 @@ func TestEmptyNonTxScript(t *testing.T) {
 	dbase.Migrations("L1", Script("EMPTY", ""))
 	require.NoError(t, s.Migrate(context.Background()))
 	m, ok := dbase.Lookup(libschema.MigrationName{Library: "L1", Name: "EMPTY"})
-	if !ok || !m.Base().Status().Done {
-		t.Fatalf("empty migration not marked done")
-	}
+	require.True(t, ok, "expected migration lookup to succeed")
+	assert.True(t, m.Base().Status().Done, "empty migration not marked done")
 }
 
 // TestAdjustNonTxVersion ensures version-specific pruning logic behaves as expected.
 func TestAdjustNonTxVersion(t *testing.T) {
 	p := &Postgres{nonTxStmtRegex: append([]*regexp.Regexp{}, baseNonTxStmtRegex...)}
 	original := len(p.nonTxStmtRegex)
-	if original == 0 {
-		t.Fatal("expected baseNonTxStmtRegex to have patterns")
-	}
+	require.NotZero(t, original, "expected baseNonTxStmtRegex to have patterns")
 	p.adjustNonTxForVersion(12)
-	if len(p.nonTxStmtRegex) >= original {
-		t.Fatalf("expected fewer patterns after version adjust (orig=%d now=%d)", original, len(p.nonTxStmtRegex))
-	}
+	assert.Less(t, len(p.nonTxStmtRegex), original, "expected fewer patterns after version adjust (orig=%d now=%d)", original, len(p.nonTxStmtRegex))
 }

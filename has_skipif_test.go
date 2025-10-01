@@ -1,18 +1,24 @@
 package libschema_test
 
 import (
-    "testing"
+	"testing"
 
-    "github.com/muir/libschema"
-    "github.com/muir/libschema/lspostgres"
+	"github.com/stretchr/testify/require"
+
+	"github.com/muir/libschema"
+	"github.com/muir/libschema/lspostgres"
 )
 
 // TestHasSkipIf ensures the HasSkipIf branch is covered.
 // fakeMigration is a lightweight migration to test options wiring.
 
 func TestHasSkipIf(t *testing.T) {
-    m := lspostgres.Script("S", "SELECT 1", libschema.SkipIf(func() (bool, error) { return false, nil }))
-    if !m.Base().HasSkipIf() { t.Fatalf("expected HasSkipIf to be true") }
-    m2 := lspostgres.Script("S2", "SELECT 1", libschema.SkipRemainingIf(func() (bool, error) { return false, nil }))
-    if m2.Base().HasSkipIf() { t.Fatalf("SkipRemainingIf should not set skipIf predicate") }
+	m := lspostgres.Script("S", "SELECT 1", libschema.SkipIf(func() (bool, error) { return false, nil }))
+	if !m.Base().HasSkipIf() {
+		require.FailNow(t, "expected HasSkipIf to be true")
+	}
+	m2 := lspostgres.Script("S2", "SELECT 1", libschema.SkipRemainingIf(func() (bool, error) { return false, nil }))
+	if m2.Base().HasSkipIf() {
+		require.FailNow(t, "SkipRemainingIf should not set skipIf predicate")
+	}
 }

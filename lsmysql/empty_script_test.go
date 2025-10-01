@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/muir/libschema"
@@ -37,11 +38,7 @@ func TestEmptyScriptNoOp(t *testing.T) {
 
 	require.NoError(t, s.Migrate(context.Background()))
 	m, _ := dbase.Lookup(libschema.MigrationName{Library: "L1", Name: "EMPTY"})
-	if m == nil {
-		t.Fatalf("migration not registered")
-	}
+	require.NotNil(t, m, "migration not registered")
 	// Empty script returns early before exec; driver treats as success -> Done should be true.
-	if !m.Base().Status().Done {
-		t.Fatalf("empty script should mark migration done")
-	}
+	assert.True(t, m.Base().Status().Done, "empty script should mark migration done")
 }

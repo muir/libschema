@@ -214,9 +214,7 @@ func TestGenerateDBInference(t *testing.T) {
 	gen := lspostgres.Generate[*sql.DB]("GEN_DB_"+lib, func(_ context.Context, _ *sql.DB) string { return "INSERT INTO gen_db_inf (id) VALUES (1)" })
 	dbase.Migrations(lib, setup, gen)
 	require.NoError(t, s.Migrate(ctx))
-	if !gen.Base().NonTransactional() {
-		t.Fatalf("Generate[*sql.DB] should be non-transactional")
-	}
+	assert.True(t, gen.Base().NonTransactional(), "Generate[*sql.DB] should be non-transactional")
 }
 
 // TestComputedDBInference ensures Computed[*sql.DB] is inferred non-transactional and runs logic.
@@ -249,12 +247,8 @@ func TestComputedDBInference(t *testing.T) {
 	})
 	dbase.Migrations(lib, comp)
 	require.NoError(t, s.Migrate(ctx))
-	if !comp.Base().NonTransactional() {
-		t.Fatalf("Computed[*sql.DB] should be non-transactional")
-	}
-	if !ran {
-		t.Fatalf("computed function body did not run")
-	}
+	assert.True(t, comp.Base().NonTransactional(), "Computed[*sql.DB] should be non-transactional")
+	assert.True(t, ran, "computed function body did not run")
 }
 
 // TestComputedFailure ensures a computed migration that returns an error surfaces it and records failure.
@@ -279,19 +273,11 @@ func TestComputedFailure(t *testing.T) {
 	bad := lspostgres.Computed("BAD", func(_ context.Context, _ *sql.Tx) error { return failErr })
 	dbase.Migrations(lib, bad)
 	err = s.Migrate(ctx)
-	if err == nil {
-		t.Fatalf("expected migration failure error, got nil")
-	}
+	require.Error(t, err, "expected migration failure error")
 	// Lookup the stored migration (Database.Migrations makes a copy)
 	stored, ok := dbase.Lookup(libschema.MigrationName{Library: lib, Name: "BAD"})
-	if !ok {
-		t.Fatalf("could not lookup stored migration copy")
-	}
+	require.True(t, ok, "could not lookup stored migration copy")
 	st := stored.Base().Status()
-	if st.Done {
-		t.Fatalf("expected migration not marked done after failure")
-	}
-	if st.Error == "" {
-		t.Fatalf("expected error message recorded; got empty status: %+v", st)
-	}
+	assert.False(t, st.Done, "expected migration not marked done after failure")
+	assert.NotEmpty(t, st.Error, "expected error message recorded; got empty status: %+v", st)
 }

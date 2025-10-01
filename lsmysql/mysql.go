@@ -133,32 +133,25 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 
 // Generate defines a migration returning a SQL string. If T implements TxLike it's transactional else non-transactional.
 func Generate[T ConnPtr](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
-	var zero T
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
-	expectedTx := true
+	var zero T
+	var mustBeNonTransactional bool
 	switch any(zero).(type) {
 	case *sql.Tx:
 		pm.scriptTx = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, any(tx).(T)), nil }
 	case *sql.DB:
-		expectedTx = false
-		pm.scriptDB = func(ctx context.Context, db *sql.DB) (string, error) { return generator(ctx, any(db).(T)), nil }
+		mustBeNonTransactional = true
 		pm.SetNonTransactional(true)
+		pm.scriptDB = func(ctx context.Context, db *sql.DB) (string, error) { return generator(ctx, any(db).(T)), nil }
 	}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(m)
 	}
-	finalTx := !m.Base().NonTransactional()
+	expectedTx := !mustBeNonTransactional
+	finalTx := !pm.NonTransactional()
 	if expectedTx != finalTx && pm.creationErr == nil {
 		pm.creationErr = errors.Errorf("Generate[%T] %s transactional override mismatch (expected %s)", zero, name, ternary(expectedTx, "transactional", "non-transactional"))
-	}
-	// Normalize function to final mode after options
-	if m.Base().NonTransactional() && pm.scriptDB == nil && pm.creationErr == nil {
-		pm.scriptDB = func(ctx context.Context, db *sql.DB) (string, error) { return generator(ctx, any(db).(T)), nil }
-		pm.scriptTx = nil
-	} else if !m.Base().NonTransactional() && pm.scriptTx == nil && pm.creationErr == nil {
-		pm.scriptTx = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, any(tx).(T)), nil }
-		pm.scriptDB = nil
 	}
 	return m
 }
