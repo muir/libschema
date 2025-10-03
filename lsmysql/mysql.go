@@ -14,6 +14,7 @@ import (
 
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"
+	"github.com/muir/libschema/internal/migfinalize"
 )
 
 // MySQL is a libschema.Driver for connecting to MySQL-like databases that
@@ -199,126 +200,115 @@ func ternary[T any](cond bool, a, b T) T {
 // It is expected to be called by libschema and is not
 // called internally which means that is safe to override
 // in types that embed MySQL.
-func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (res sql.Result, err error) {
+func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (sql.Result, error) {
 	pm := m.(*mmigration)
 	if pm.creationErr != nil {
 		return nil, pm.creationErr
 	}
-	runTransactional := !m.Base().NonTransactional()
-	var tx *sql.Tx
-	if runTransactional {
-		if tx, err = d.DB().BeginTx(ctx, d.Options.MigrationTxOptions); err != nil {
-			return nil, errors.Wrapf(err, "begin Tx for migration %s", m.Base().Name)
-		}
-		if d.Options.SchemaOverride != "" {
-			if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
-				return nil, errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
-			}
-			if _, err2 := tx.Exec(`USE ` + d.Options.SchemaOverride); err2 != nil {
-				_ = tx.Rollback()
-				return nil, errors.Wrapf(err2, "set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
-			}
-		}
-	}
-	defer func() {
-		done := err == nil
-		if runTransactional {
-			if err == nil {
-				if serr := p.saveStatus(log, tx, d, m, true, nil); serr != nil {
-					err = serr
-					_ = tx.Rollback()
-					return
-				}
-				if cerr := tx.Commit(); cerr != nil {
-					err = errors.Wrapf(cerr, "commit migration %s", m.Base().Name)
-					return
-				}
-				m.Base().SetStatus(libschema.MigrationStatus{Done: true})
-				return
-			}
-			_ = tx.Rollback()
-		}
-		// Non-transactional or failed transactional path: record separately
-		stx, txErr := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
-		if txErr != nil {
-			if err == nil {
-				err = errors.Wrapf(txErr, "begin status tx for %s", m.Base().Name)
-			} else {
-				err = errors.Wrapf(err, "(and could not begin status tx: %s)", txErr)
-			}
-			return
-		}
-		if serr := p.saveStatus(log, stx, d, m, done, err); serr != nil {
-			if err == nil {
-				err = serr
-			} else {
-				err = errors.Wrapf(err, "save status for %s also failed: %s", m.Base().Name, serr)
-			}
-			_ = stx.Rollback()
-			return
-		}
-		if cerr := stx.Commit(); cerr != nil {
-			if err == nil {
-				err = errors.Wrapf(cerr, "commit status tx for %s", m.Base().Name)
-			} else {
-				err = errors.Wrapf(err, "commit status tx for %s also failed: %s", m.Base().Name, cerr)
-			}
-			return
-		}
-		if done && err == nil {
-			m.Base().SetStatus(libschema.MigrationStatus{Done: true})
-		} else if !done && err != nil {
-			m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()})
-		}
-	}()
+	var res sql.Result
 
-	if pm.scriptTx != nil || pm.scriptDB != nil {
-		var sqlText string
-		if runTransactional && pm.scriptTx != nil {
-			sqlText, err = pm.scriptTx(ctx, tx)
-		} else if !runTransactional && pm.scriptDB != nil {
-			sqlText, err = pm.scriptDB(ctx, d.DB())
-		} else if pm.creationErr != nil { // safety
-			return nil, pm.creationErr
-		} else {
-			return nil, errors.Errorf("migration %s transactional mode mismatch", m.Base().Name)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(sqlText) == "" {
-			return nil, nil
-		}
-		if runTransactional {
-			if err = CheckScript(sqlText); err != nil {
-				return nil, errors.Wrap(err, sqlText)
+	f := &migfinalize.Finalizer[sql.DB, sql.Tx]{
+		Ctx:              ctx,
+		DB:               d.DB(),
+		RunTransactional: !m.Base().NonTransactional(),
+		Log:              log,
+		BeginTx: func(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
+			tx, err := db.BeginTx(ctx, d.Options.MigrationTxOptions)
+			if d.Options.SchemaOverride != "" {
+				if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
+					_ = tx.Rollback()
+					return nil, errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
+				}
+				if _, err2 := tx.Exec(`USE ` + d.Options.SchemaOverride); err2 != nil {
+					_ = tx.Rollback()
+					return nil, errors.Wrapf(err2, "set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
+				}
 			}
-		} else {
-			_ = sqltoken.TokenizeMySQL(sqlText) // placeholder for symmetry with Postgres classification tests
-		}
-		if runTransactional {
-			res, err = tx.ExecContext(ctx, sqlText)
-		} else {
-			res, err = d.DB().ExecContext(ctx, sqlText)
-		}
-		if err != nil {
-			return nil, errors.Wrap(err, sqlText)
-		}
-		return res, nil
+			if err != nil {
+				return nil, errors.Wrapf(err, "begin Tx for migration %s", m.Base().Name)
+			}
+			return tx, nil
+		},
+		BodyTx: func(ctx context.Context, tx *sql.Tx) error {
+			if pm.scriptTx != nil || pm.scriptDB != nil {
+				if pm.scriptTx == nil {
+					return errors.Errorf("migration %s transactional mode mismatch", m.Base().Name)
+				}
+				sqlText, err := pm.scriptTx(ctx, tx)
+				if err != nil {
+					return errors.WithStack(err)
+				}
+				if strings.TrimSpace(sqlText) == "" {
+					return nil
+				}
+				if err = CheckScript(sqlText); err != nil {
+					return errors.Wrap(err, sqlText)
+				}
+				execRes, execErr := tx.ExecContext(ctx, sqlText)
+				if execErr != nil {
+					return errors.Wrap(execErr, sqlText)
+				}
+				res = execRes
+				return nil
+			}
+			if pm.computedTx != nil || pm.computedDB != nil {
+				if pm.computedTx == nil {
+					return errors.Errorf("computed migration %s transactional mode mismatch", m.Base().Name)
+				}
+				return errors.WithStack(pm.computedTx(ctx, tx))
+			}
+			return errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
+		},
+		BodyNonTx: func(ctx context.Context, db *sql.DB) error {
+			if pm.scriptTx != nil || pm.scriptDB != nil {
+				if pm.scriptDB == nil {
+					return errors.Errorf("migration %s transactional mode mismatch", m.Base().Name)
+				}
+				sqlText, err := pm.scriptDB(ctx, db)
+				if err != nil {
+					return errors.WithStack(err)
+				}
+				if strings.TrimSpace(sqlText) == "" {
+					return nil
+				}
+				_ = sqltoken.TokenizeMySQL(sqlText)
+				execRes, execErr := db.ExecContext(ctx, sqlText)
+				if execErr != nil {
+					return errors.Wrap(execErr, sqlText)
+				}
+				res = execRes
+				return nil
+			}
+			if pm.computedTx != nil || pm.computedDB != nil {
+				if pm.computedDB == nil {
+					return errors.Errorf("computed migration %s transactional mode mismatch", m.Base().Name)
+				}
+				return errors.WithStack(pm.computedDB(ctx, db))
+			}
+			return errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
+		},
+		SaveStatusInTx: func(ctx context.Context, tx *sql.Tx) error {
+			return errors.WithStack(p.saveStatus(log, tx, d, m, true, nil))
+		},
+		CommitTx:   func(tx *sql.Tx) error { return errors.WithStack(tx.Commit()) },
+		RollbackTx: func(tx *sql.Tx) { _ = tx.Rollback() },
+		BeginStatusTx: func(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
+			stx, err := db.BeginTx(ctx, d.Options.MigrationTxOptions)
+			if err != nil {
+				return nil, errors.Wrapf(err, "begin status tx for %s", m.Base().Name)
+			}
+			return stx, nil
+		},
+		SaveStatusSeparate: func(ctx context.Context, stx *sql.Tx, migErr error) error {
+			return errors.WithStack(p.saveStatus(log, stx, d, m, migErr == nil, migErr))
+		},
+		CommitStatusTx:   func(stx *sql.Tx) error { return errors.WithStack(stx.Commit()) },
+		RollbackStatusTx: func(stx *sql.Tx) { _ = stx.Rollback() },
+		SetDone:          func() { m.Base().SetStatus(libschema.MigrationStatus{Done: true}) },
+		SetError:         func(err error) { m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()}) },
 	}
-	if pm.computedTx != nil || pm.computedDB != nil {
-		if runTransactional && pm.computedTx != nil {
-			err = pm.computedTx(ctx, tx)
-		} else if !runTransactional && pm.computedDB != nil {
-			err = pm.computedDB(ctx, d.DB())
-		} else if pm.creationErr != nil { // safety
-			return nil, pm.creationErr
-		} else {
-			return nil, errors.Errorf("computed migration %s transactional mode mismatch", m.Base().Name)
-		}
-		return nil, err
-	}
-	return nil, errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
+
+	return res, errors.WithStack(f.Run())
 }
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.

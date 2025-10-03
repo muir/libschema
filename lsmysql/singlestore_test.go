@@ -17,20 +17,23 @@ import (
 
 /*
 
-Since MySQL does not support schemas (it treats them like databases),
+Since SingleStore does not support schemas (it treats them like databases),
 LIBSCHEMA_SINGLESTORE_TEST_DSN has to give access to a user that can create
 and destroy databases.
 
 For example:
 
+export S2_LICENSE_KEY="get your license key at portal.singlestore.com"
+export S2_PASSWORD="libschema"
 docker run -i --init \
-	--name memsql-ciab \
-	-e LICENSE_KEY="GET YOUR OWN LICENSE KEY" \
-	-e ROOT_PASSWORD="YOUR S2 ROOT PASSWORD" \
+	--name libschema-s2 \
+	-e LICENSE_KEY="${S2_LICENSE_KEY}" \
+	-e ROOT_PASSWORD="${S2_PASSWORD}" \
 	-p 3306:3306 -p 8080:8080 \
-		memsql/cluster-in-a-box
+		singlestore/cluster-in-a-box
+docker start -d libschema-s2
 
-export LIBSCHEMA_SINGLESTORE_TEST_DSN="root:${PASSWORD}@tcp(127.0.0.1:3306)/publi?tls=false"
+export LIBSCHEMA_SINGLESTORE_TEST_DSN="root:${S2_PASSWORD}@tcp(127.0.0.1:3306)/publi?tls=false"
 
 */
 
