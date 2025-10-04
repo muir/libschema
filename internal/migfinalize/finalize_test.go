@@ -86,11 +86,9 @@ func (b finBuilder) build(t *testing.T) *Finalizer[fakeDB, fakeTx] {
 	// attach assertions via t.Cleanup to ensure internal expectations when needed
 	_ = statusCommitted // referenced for compile (asserted implicitly via errors returned)
 	t.Cleanup(func() {
-		if b.runTx && b.bodyErr == nil && b.saveInErr == nil && b.commitErr == nil {
-			// success path not required to test (covered by integration drivers) but builder may be reused
-		}
-		_ = committed
-		_ = statusTxOpened
+		// success path assertions intentionally omitted; integration tests cover commit logic
+		_ = committed      // referenced so staticcheck doesn't complain about unused capture
+		_ = statusTxOpened // indicates whether fallback status tx opened when needed
 	})
 	return f
 }
