@@ -132,3 +132,51 @@ func TestFinalizer_SeparateStatusCommitError(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, commitErr)
 }
+
+// New tests exercising secondary status path error precedence and logging scenarios.
+
+// BeginStatusTx returns error when there is no prior finalErr (e.g., non-tx path, body success)
+func TestFinalizer_BeginStatusTxError_NoPriorError(t *testing.T) {
+	beginErr := errors.New("begin status error")
+	f := finBuilder{runTx: false, beginStatusErr: beginErr}.build(t)
+	err := f.Run()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, beginErr)
+}
+
+// BeginStatusTx returns error but there is already a prior finalErr (simulate transactional body or commit error)
+func TestFinalizer_BeginStatusTxError_WithPriorError(t *testing.T) {
+	bodyErr := errors.New("body fail")
+	beginErr := errors.New("begin status error")
+	// Force transactional path so bodyErr is set; also force SaveStatusInTx error to avoid commit success
+	// but SaveStatusInTx error would replace bodyErr; we specifically want bodyErr to remain the finalErr.
+	// So use runTx true and bodyErr only (SaveStatusInTx not executed because bodyErr != nil).
+	f := finBuilder{runTx: true, bodyErr: bodyErr, beginStatusErr: beginErr}.build(t)
+	err := f.Run()
+	require.Error(t, err)
+	// The primary error should remain bodyErr; beginErr should be logged but not replace finalErr.
+	assert.ErrorIs(t, err, bodyErr)
+	assert.NotErrorIs(t, err, beginErr)
+}
+
+// SaveStatusSeparate returns error when prior finalErr already set; original error should be preserved.
+func TestFinalizer_SaveStatusSeparateError_WithPriorError(t *testing.T) {
+	bodyErr := errors.New("body fail")
+	saveSeparateErr := errors.New("separate save error")
+	f := finBuilder{runTx: true, bodyErr: bodyErr, saveSeparateErr: saveSeparateErr}.build(t)
+	err := f.Run()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, bodyErr)
+	assert.NotErrorIs(t, err, saveSeparateErr)
+}
+
+// CommitStatusTx returns error when prior finalErr already set; original error should be preserved.
+func TestFinalizer_CommitStatusTxError_WithPriorError(t *testing.T) {
+	bodyErr := errors.New("body fail")
+	commitStatusErr := errors.New("commit status error")
+	f := finBuilder{runTx: true, bodyErr: bodyErr, commitStatusErr: commitStatusErr}.build(t)
+	err := f.Run()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, bodyErr)
+	assert.NotErrorIs(t, err, commitStatusErr)
+}
