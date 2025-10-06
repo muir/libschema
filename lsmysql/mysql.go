@@ -228,56 +228,26 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 		if toks := sqltoken.TokenizeMySQL(pm.scriptSQL); true {
 			stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, toks)
 			if log != nil && d.Options.DebugLogging {
-				flagNames := func(f uint32) []string {
-					var n []string
-					if f&stmtclass.IsDDL != 0 {
-						n = append(n, "DDL")
-					}
-					if f&stmtclass.IsDML != 0 {
-						n = append(n, "DML")
-					}
-					if f&stmtclass.IsNonIdempotent != 0 {
-						n = append(n, "NonIdem")
-					}
-					if f&stmtclass.IsMultipleStatements != 0 {
-						n = append(n, "Multi")
-					}
-					return n
-				}
 				for i, s := range stmts {
-					log.Debug("classification stmt", map[string]interface{}{"phase": "pre-downgrade", "index": i, "text": s.Text, "flags": flagNames(s.Flags)})
+					log.Debug("classification stmt", map[string]interface{}{"phase": "pre-downgrade", "index": i, "text": s.Text, "flags": stmtclass.FlagNames(s.Flags)})
 				}
-				log.Debug("classification aggregate", map[string]interface{}{"phase": "pre-downgrade", "flags": flagNames(agg), "sql": pm.scriptSQL})
+				log.Debug("classification aggregate", map[string]interface{}{"phase": "pre-downgrade", "flags": stmtclass.FlagNames(agg), "sql": pm.scriptSQL})
 			}
-			if agg&stmtclass.IsDDL != 0 { // downgrade for any DDL presence
+			sum := stmtclass.SummarizeStatements(stmts, agg)
+			if sum.HasDDL { // downgrade for any DDL presence
 				pm.SetNonTransactional(true)
 				pm.scriptDB = func(_ context.Context, _ *sql.DB) (string, error) { return pm.scriptSQL, nil }
 				pm.scriptTx = nil
-				// Determine mixture & non-idempotency with correct precedence
-				var seenDDL, seenDML bool
-				var firstNonIdem string
-				for _, s := range stmts {
-					if s.Flags&stmtclass.IsDDL != 0 {
-						seenDDL = true
-					}
-					if s.Flags&stmtclass.IsDML != 0 {
-						seenDML = true
-					}
-					if firstNonIdem == "" && (s.Flags&(stmtclass.IsDDL|stmtclass.IsNonIdempotent) == (stmtclass.IsDDL | stmtclass.IsNonIdempotent)) {
-						firstNonIdem = s.Text
-					}
-				}
-				if seenDDL && seenDML {
+				if sum.HasDDL && sum.HasDML {
 					pm.creationErr = errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
 				} else {
-					if firstNonIdem != "" {
+					if sum.FirstNonIdempotentDDL != "" {
 						pm.hasNonIdempotentDDL = true
-						if pm.scriptSQL != "" && !pm.Base().HasSkipIf() { // Script without external guard
+						if pm.scriptSQL != "" && !pm.Base().HasSkipIf() {
 							pm.unguardedNonIdempotentDDL = true
 						}
 					}
-					// Additional rule: non-idempotent DDL that is easily fixable (CREATE TABLE lacking IF NOT EXISTS) remains an error
-					if pm.creationErr == nil { // only if no prior mixed error
+					if pm.creationErr == nil {
 						for _, s := range stmts {
 							if s.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix | stmtclass.IsNonIdempotent) {
 								pm.creationErr = errors.Errorf("non-idempotent DDL '%s': %w", s.Text, libschema.ErrNonIdempotentDDL)
@@ -369,26 +339,10 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				}
 				stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, sqltoken.TokenizeMySQL(sqlText))
 				if log != nil && d.Options.DebugLogging {
-					flagNames := func(f uint32) []string {
-						var n []string
-						if f&stmtclass.IsDDL != 0 {
-							n = append(n, "DDL")
-						}
-						if f&stmtclass.IsDML != 0 {
-							n = append(n, "DML")
-						}
-						if f&stmtclass.IsNonIdempotent != 0 {
-							n = append(n, "NonIdem")
-						}
-						if f&stmtclass.IsMultipleStatements != 0 {
-							n = append(n, "Multi")
-						}
-						return n
-					}
 					for i, s := range stmts {
-						log.Debug("classification stmt", map[string]interface{}{"phase": "body-non-tx", "index": i, "text": s.Text, "flags": flagNames(s.Flags)})
+						log.Debug("classification stmt", map[string]interface{}{"phase": "body-non-tx", "index": i, "text": s.Text, "flags": stmtclass.FlagNames(s.Flags)})
 					}
-					log.Debug("classification aggregate", map[string]interface{}{"phase": "body-non-tx", "flags": flagNames(agg), "sql": sqlText})
+					log.Debug("classification aggregate", map[string]interface{}{"phase": "body-non-tx", "flags": stmtclass.FlagNames(agg), "sql": sqlText})
 				}
 				// Mixed DDL + DML disallowed for MySQL (both transactional & downgraded non-tx paths)
 				if (agg&stmtclass.IsDDL != 0) && (agg&stmtclass.IsDML != 0) {

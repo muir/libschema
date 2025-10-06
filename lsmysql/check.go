@@ -20,31 +20,25 @@ var (
 func CheckScript(s string) error {
 	ts := sqltoken.TokenizeMySQL(s)
 	stmts, agg := stmtclass.ClassifyScript(ts)
-	// Detect mixed DDL + DML
-	var sawDDL, sawDML bool
-	var firstDDL, firstDML, firstNonIdem string
-	for _, st := range stmts {
-		if st.Flags&stmtclass.IsDDL != 0 {
-			if !sawDDL {
+	sum := stmtclass.SummarizeStatements(stmts, agg)
+	if sum.HasDDL && sum.HasDML {
+		// discover first DDL & DML for message reconstruction
+		var firstDDL, firstDML string
+		for _, st := range stmts {
+			if firstDDL == "" && st.Flags&stmtclass.IsDDL != 0 {
 				firstDDL = st.Text
 			}
-			sawDDL = true
-			if st.Flags&stmtclass.IsNonIdempotent != 0 && firstNonIdem == "" {
-				firstNonIdem = st.Text
-			}
-		}
-		if st.Flags&stmtclass.IsDML != 0 {
-			if !sawDML {
+			if firstDML == "" && st.Flags&stmtclass.IsDML != 0 {
 				firstDML = st.Text
 			}
-			sawDML = true
+			if firstDDL != "" && firstDML != "" {
+				break
+			}
 		}
-	}
-	if sawDDL && sawDML {
 		return errors.Errorf("data command '%s' combined with DDL command '%s': %w", firstDML, firstDDL, ErrDataAndDDL)
 	}
-	if agg&stmtclass.IsNonIdempotent != 0 && firstNonIdem != "" {
-		return errors.Errorf("non-idempotent DDL '%s': %w", firstNonIdem, ErrNonIdempotentDDL)
+	if sum.FirstNonIdempotentDDL != "" && agg&stmtclass.IsNonIdempotent != 0 {
+		return errors.Errorf("non-idempotent DDL '%s': %w", sum.FirstNonIdempotentDDL, ErrNonIdempotentDDL)
 	}
 	return nil
 }
