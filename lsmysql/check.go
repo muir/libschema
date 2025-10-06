@@ -2,16 +2,15 @@ package lsmysql
 
 import (
 	"github.com/memsql/errors"
+	"github.com/muir/libschema"
+	"github.com/muir/libschema/internal/stmtclass"
 	"github.com/muir/sqltoken"
-
-	"github.com/muir/libschema/internal/stmtcheck"
 )
 
+// Deprecated: Use libschema.ErrDataAndDDL / libschema.ErrNonIdempotentDDL directly.
 var (
-	// ErrDataAndDDL indicates a script mixes data-changing and schema-changing statements
-	ErrDataAndDDL = stmtcheck.ErrDataAndDDL
-	// ErrNonIdempotentDDL indicates a DDL statement lacking an IF (NOT) EXISTS guard
-	ErrNonIdempotentDDL = stmtcheck.ErrNonIdempotentDDL
+	ErrDataAndDDL       = libschema.ErrDataAndDDL
+	ErrNonIdempotentDDL = libschema.ErrNonIdempotentDDL
 )
 
 // CheckScript attempts to validate that an SQL command does not do
@@ -20,14 +19,32 @@ var (
 // ErrNonIdempotentDDL.
 func CheckScript(s string) error {
 	ts := sqltoken.TokenizeMySQL(s)
-	err := stmtcheck.AnalyzeTokens(ts)
-	if err == nil {
-		return nil
+	stmts, agg := stmtclass.ClassifyScript(ts)
+	// Detect mixed DDL + DML
+	var sawDDL, sawDML bool
+	var firstDDL, firstDML, firstNonIdem string
+	for _, st := range stmts {
+		if st.Flags&stmtclass.IsDDL != 0 {
+			if !sawDDL {
+				firstDDL = st.Text
+			}
+			sawDDL = true
+			if st.Flags&stmtclass.IsNonIdempotent != 0 && firstNonIdem == "" {
+				firstNonIdem = st.Text
+			}
+		}
+		if st.Flags&stmtclass.IsDML != 0 {
+			if !sawDML {
+				firstDML = st.Text
+			}
+			sawDML = true
+		}
 	}
-	// Preserve error wrapping semantics referencing historical error variables
-	if errors.Is(err, stmtcheck.ErrDataAndDDL) || errors.Is(err, stmtcheck.ErrNonIdempotentDDL) {
-		return err
+	if sawDDL && sawDML {
+		return errors.Errorf("data command '%s' combined with DDL command '%s': %w", firstDML, firstDDL, ErrDataAndDDL)
 	}
-	// Fallback: return as-is
-	return err
+	if agg&stmtclass.IsNonIdempotent != 0 && firstNonIdem != "" {
+		return errors.Errorf("non-idempotent DDL '%s': %w", firstNonIdem, ErrNonIdempotentDDL)
+	}
+	return nil
 }

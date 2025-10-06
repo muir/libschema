@@ -6,7 +6,9 @@ import (
 	"github.com/muir/libschema/internal"
 )
 
-// Finalizer orchestrates a migration attempt and status persistence.
+// Finalizer orchestrates a migration attempt and status persistence. It exists to
+// allow unit testing of the logic and to make the logic shared between database drivers.
+//
 // Assumptions / rules:
 //   - TX must be a pointer type (e.g. *sql.Tx); we rely on direct nil comparisons.
 //   - No optional callbacks: every function field must be set (supply no-op when unused).
@@ -128,5 +130,5 @@ func (f *Finalizer[DB, TX]) Run() (finalErr error) {
 	} else {
 		bodyErr = f.BodyNonTx(f.Ctx, f.DB)
 	}
-	return // finalErr set in defer
+	return finalErr // finalErr set in defer
 }

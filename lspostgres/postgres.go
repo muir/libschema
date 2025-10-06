@@ -17,7 +17,7 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/internal/migfinalize"
-	"github.com/muir/libschema/internal/stmtcheck"
+	"github.com/muir/libschema/internal/stmtclass"
 )
 
 // Postgres is a libschema.Driver for connecting to Postgres-like databases that
@@ -309,14 +309,21 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				if len(cmds) != 1 {
 					return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement (convert to Computed[*sql.DB] for complex logic)", m.Base().Name)
 				}
-				if err := stmtcheck.AnalyzeTokens(ts); err != nil {
-					if errors.Is(err, stmtcheck.ErrDataAndDDL) {
-						return errors.Wrapf(err, "validation failure for %s", m.Base().Name)
-					}
-					if errors.Is(err, stmtcheck.ErrNonIdempotentDDL) {
-						return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "validation failure for %s: %v", m.Base().Name, err)
-					}
+				// New dialect-aware classification replaces legacy AnalyzeTokens.
+				stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectPostgres, ts)
+				if agg&stmtclass.IsMultipleStatements != 0 || len(stmts) != 1 { // defensive; parser split above should already enforce 1
+					return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement", m.Base().Name)
 				}
+				f := stmts[0].Flags
+				if f&stmtclass.IsNonIdempotent != 0 {
+					if f&stmtclass.IsEasilyIdempotentFix != 0 {
+						// Easy fix (e.g. CREATE TABLE/INDEX/SEQUENCE without IF NOT EXISTS, DROP without IF EXISTS, etc.) -> hard error
+						return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent statement that is easily idempotent (add IF [NOT] EXISTS): %s", m.Base().Name, strings.TrimSpace(stmts[0].Text))
+					}
+					// Harder to make idempotent automatically: allow but warn.
+					p.log.Warn("allowing non-transactional non-idempotent (hard-fix) statement in " + m.Base().Name.String() + ": " + strings.TrimSpace(stmts[0].Text))
+				}
+				// Retain specialized regex requirements (eg CREATE INDEX CONCURRENTLY) until folded fully into classifier.
 				lower := strings.ToLower(sqlText)
 				for _, req := range nonTxIdempotencyRequirements {
 					if req.re.MatchString(lower) && !strings.Contains(lower, req.requiredSubstr) {

@@ -9,6 +9,22 @@ import (
 	"github.com/muir/libschema/internal"
 )
 
+// Sentinel errors promoted from legacy classification logic (previously in the
+// removed internal/stmtcheck package, now handled by internal/stmtclass). They may
+// be returned (wrapped) by drivers or helper validation when a migration mixes
+// disallowed statement types or includes easily-idempotent-but-unguarded DDL.
+//
+// ErrDataAndDDL: a script mixes schema changing (DDL) and data manipulation (DML)
+// commands in a context where that is disallowed (e.g. MySQL/SingleStore transactional).
+// ErrNonIdempotentDDL: a non-transactional migration contains DDL lacking an
+// IF (NOT) EXISTS guard where one is trivially applicable.
+//
+// These are string sentinel errors so callers can use errors.Is().
+var (
+	ErrDataAndDDL       errors.String = "migration combines DDL (schema changes) and data manipulation"
+	ErrNonIdempotentDDL errors.String = "unconditional migration has non-idempotent DDL"
+)
+
 const DefaultTrackingTable = "libschema.migration_status"
 
 // Driver interface is what's required to use libschema with a new

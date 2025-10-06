@@ -115,7 +115,8 @@ func TestBadMigrationsPostgres(t *testing.T) {
 				}
 			},
 		},
-		// Add sentinel-based validation cases (non-idempotent / mixes data & DDL) using stmtcheck
+		// Add sentinel-based validation cases (non-idempotent / mixes data & DDL) formerly enforced
+		// by legacy stmtcheck (now handled by dialect-aware stmtclass classifier)
 		{
 			name:     "non idempotent",
 			sentinel: libschema.ErrNonIdempotentNonTx,
@@ -128,7 +129,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 			name:     "combines data & ddl (multi-stmt non-tx)",
 			sentinel: libschema.ErrNonTxMultipleStatements,
 			define: func(dbase *libschema.Database) {
-				// Forcing non-transactional turns multi-statement into an error before stmtcheck classification
+				// Forcing non-transactional turns multi-statement into an error before stmtclass classification
 				dbase.Migrations("L2", lspostgres.Script("T4", `CREATE TABLE IF NOT EXISTS t1 (id text); INSERT INTO t1 (id) VALUES ('foo')`, libschema.ForceNonTransactional()))
 			},
 		},

@@ -15,7 +15,10 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/internal/migfinalize"
+	"github.com/muir/libschema/internal/stmtclass"
 )
+
+// retained regexp use for identifier validation
 
 // MySQL is a libschema.Driver for connecting to MySQL-like databases that
 // have the following characteristics:
@@ -104,21 +107,28 @@ type mmigration struct {
 	libschema.MigrationBase
 	scriptTx    func(context.Context, *sql.Tx) (string, error)
 	scriptDB    func(context.Context, *sql.DB) (string, error)
+	scriptSQL   string // original literal SQL when defined via Script(); used for pre-analysis
 	computedTx  func(context.Context, *sql.Tx) error
 	computedDB  func(context.Context, *sql.DB) error
 	creationErr error
+	// classification-derived flags (not persisted outside execution)
+	hasNonIdempotentDDL       bool
+	unguardedNonIdempotentDDL bool // true only for Script()-origin, missing SkipIf
 }
 
 func (m *mmigration) Copy() libschema.Migration {
-	return &mmigration{MigrationBase: m.MigrationBase.Copy(), scriptTx: m.scriptTx, scriptDB: m.scriptDB, computedTx: m.computedTx, computedDB: m.computedDB, creationErr: m.creationErr}
+	n := *m
+	n.MigrationBase = m.MigrationBase.Copy()
+	return &n
 }
+
 func (m *mmigration) Base() *libschema.MigrationBase { return &m.MigrationBase }
 
 // Script registers a literal SQL migration. Always transactional by default (uses *sql.Tx)
 // unless overridden with ForceNonTransactional().
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
-	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
-	// Always transactional unless overridden explicitly
+	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, scriptSQL: sqlText}
+	// Always transactional unless overridden explicitly. Keep original SQL for pre-downgrade detection.
 	pm.scriptTx = func(_ context.Context, _ *sql.Tx) (string, error) { return sqlText, nil }
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
@@ -205,7 +215,87 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 	if pm.creationErr != nil {
 		return nil, pm.creationErr
 	}
+	if log != nil && d.Options.DebugLogging {
+		log.Debug("migration start", map[string]interface{}{"migration": m.Base().Name, "nonTx": m.Base().NonTransactional(), "hasScriptSQL": pm.scriptSQL != "", "hasScriptTx": pm.scriptTx != nil})
+	}
 	var res sql.Result
+
+	// Pre-execution downgrade: If defined via Script() (literal SQL captured) and marked transactional
+	// but contains DDL, automatically force non-transactional execution so that DDL executes safely
+	// outside a transaction (MySQL autocommit semantics). Only perform when the user did not already
+	// mark migration as NonTransactional().
+	if pm.scriptSQL != "" && !pm.NonTransactional() && pm.scriptTx != nil {
+		if toks := sqltoken.TokenizeMySQL(pm.scriptSQL); true {
+			stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, toks)
+			if log != nil && d.Options.DebugLogging {
+				flagNames := func(f uint32) []string {
+					var n []string
+					if f&stmtclass.IsDDL != 0 {
+						n = append(n, "DDL")
+					}
+					if f&stmtclass.IsDML != 0 {
+						n = append(n, "DML")
+					}
+					if f&stmtclass.IsNonIdempotent != 0 {
+						n = append(n, "NonIdem")
+					}
+					if f&stmtclass.IsMultipleStatements != 0 {
+						n = append(n, "Multi")
+					}
+					return n
+				}
+				for i, s := range stmts {
+					log.Debug("classification stmt", map[string]interface{}{"phase": "pre-downgrade", "index": i, "text": s.Text, "flags": flagNames(s.Flags)})
+				}
+				log.Debug("classification aggregate", map[string]interface{}{"phase": "pre-downgrade", "flags": flagNames(agg), "sql": pm.scriptSQL})
+			}
+			if agg&stmtclass.IsDDL != 0 { // downgrade for any DDL presence
+				pm.SetNonTransactional(true)
+				pm.scriptDB = func(_ context.Context, _ *sql.DB) (string, error) { return pm.scriptSQL, nil }
+				pm.scriptTx = nil
+				// Determine mixture & non-idempotency with correct precedence
+				var seenDDL, seenDML bool
+				var firstNonIdem string
+				for _, s := range stmts {
+					if s.Flags&stmtclass.IsDDL != 0 {
+						seenDDL = true
+					}
+					if s.Flags&stmtclass.IsDML != 0 {
+						seenDML = true
+					}
+					if firstNonIdem == "" && (s.Flags&(stmtclass.IsDDL|stmtclass.IsNonIdempotent) == (stmtclass.IsDDL | stmtclass.IsNonIdempotent)) {
+						firstNonIdem = s.Text
+					}
+				}
+				if seenDDL && seenDML {
+					pm.creationErr = errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
+				} else {
+					if firstNonIdem != "" {
+						pm.hasNonIdempotentDDL = true
+						if pm.scriptSQL != "" && !pm.Base().HasSkipIf() { // Script without external guard
+							pm.unguardedNonIdempotentDDL = true
+						}
+					}
+					// Additional rule: non-idempotent DDL that is easily fixable (CREATE TABLE lacking IF NOT EXISTS) remains an error
+					if pm.creationErr == nil { // only if no prior mixed error
+						for _, s := range stmts {
+							if s.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix | stmtclass.IsNonIdempotent) {
+								pm.creationErr = errors.Errorf("non-idempotent DDL '%s': %w", s.Text, libschema.ErrNonIdempotentDDL)
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	// Honor any creationErr discovered during pre-classification
+	if pm.creationErr != nil {
+		if log != nil && d.Options.DebugLogging {
+			log.Debug("creationErr after pre-classification", map[string]interface{}{"error": pm.creationErr.Error(), "migration": m.Base().Name})
+		}
+		return nil, pm.creationErr
+	}
 
 	f := &migfinalize.Finalizer[sql.DB, sql.Tx]{
 		Ctx:              ctx,
@@ -241,9 +331,6 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				if strings.TrimSpace(sqlText) == "" {
 					return nil
 				}
-				if err = CheckScript(sqlText); err != nil {
-					return errors.Wrap(err, sqlText)
-				}
 				execRes, execErr := tx.ExecContext(ctx, sqlText)
 				if execErr != nil {
 					return errors.Wrap(execErr, sqlText)
@@ -264,6 +351,15 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				if pm.scriptDB == nil {
 					return errors.Errorf("migration %s transactional mode mismatch", m.Base().Name)
 				}
+				// Ensure schema override is applied for non-transactional execution paths (including downgraded ones).
+				if d.Options.SchemaOverride != "" {
+					if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
+						return errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
+					}
+					if _, err := db.ExecContext(ctx, `USE `+d.Options.SchemaOverride); err != nil {
+						return errors.Wrapf(err, "set schema/database to %s for %s", d.Options.SchemaOverride, m.Base().Name)
+					}
+				}
 				sqlText, err := pm.scriptDB(ctx, db)
 				if err != nil {
 					return errors.WithStack(err)
@@ -271,7 +367,43 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				if strings.TrimSpace(sqlText) == "" {
 					return nil
 				}
-				_ = sqltoken.TokenizeMySQL(sqlText)
+				stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, sqltoken.TokenizeMySQL(sqlText))
+				if log != nil && d.Options.DebugLogging {
+					flagNames := func(f uint32) []string {
+						var n []string
+						if f&stmtclass.IsDDL != 0 {
+							n = append(n, "DDL")
+						}
+						if f&stmtclass.IsDML != 0 {
+							n = append(n, "DML")
+						}
+						if f&stmtclass.IsNonIdempotent != 0 {
+							n = append(n, "NonIdem")
+						}
+						if f&stmtclass.IsMultipleStatements != 0 {
+							n = append(n, "Multi")
+						}
+						return n
+					}
+					for i, s := range stmts {
+						log.Debug("classification stmt", map[string]interface{}{"phase": "body-non-tx", "index": i, "text": s.Text, "flags": flagNames(s.Flags)})
+					}
+					log.Debug("classification aggregate", map[string]interface{}{"phase": "body-non-tx", "flags": flagNames(agg), "sql": sqlText})
+				}
+				// Mixed DDL + DML disallowed for MySQL (both transactional & downgraded non-tx paths)
+				if (agg&stmtclass.IsDDL != 0) && (agg&stmtclass.IsDML != 0) {
+					return errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
+				}
+				// Non-idempotent DDL: allow if not a CREATE TABLE missing IF NOT EXISTS. If unguarded Script, warn once.
+				if pm.hasNonIdempotentDDL && pm.unguardedNonIdempotentDDL && log != nil && d.Options.DebugLogging {
+					log.Warn("unguarded non-idempotent DDL; consider adding SkipIf or making idempotent", map[string]interface{}{"migration": m.Base().Name})
+				}
+				// Enforce easy-fix non-idempotent statements at execution time if somehow not caught earlier
+				for _, s := range stmts {
+					if s.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix | stmtclass.IsNonIdempotent) {
+						return errors.Errorf("non-idempotent DDL '%s': %w", s.Text, libschema.ErrNonIdempotentDDL)
+					}
+				}
 				execRes, execErr := db.ExecContext(ctx, sqlText)
 				if execErr != nil {
 					return errors.Wrap(execErr, sqlText)
@@ -288,6 +420,9 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 			return errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
 		},
 		SaveStatusInTx: func(ctx context.Context, tx *sql.Tx) error {
+			if log != nil && d.Options.DebugLogging {
+				log.Debug("save status (in-tx)", map[string]interface{}{"migration": m.Base().Name})
+			}
 			return errors.WithStack(p.saveStatus(log, tx, d, m, true, nil))
 		},
 		CommitTx:   func(tx *sql.Tx) error { return errors.WithStack(tx.Commit()) },
@@ -300,6 +435,14 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 			return stx, nil
 		},
 		SaveStatusSeparate: func(ctx context.Context, stx *sql.Tx, migErr error) error {
+			if log != nil && d.Options.DebugLogging {
+				log.Debug("save status (separate)", map[string]interface{}{"migration": m.Base().Name, "migErr": func() string {
+					if migErr != nil {
+						return migErr.Error()
+					}
+					return ""
+				}()})
+			}
 			return errors.WithStack(p.saveStatus(log, stx, d, m, migErr == nil, migErr))
 		},
 		CommitStatusTx:   func(stx *sql.Tx) error { return errors.WithStack(stx.Commit()) },
