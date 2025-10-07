@@ -73,3 +73,19 @@ func TestFlagNamesAndSummarize(t *testing.T) {
 		t.Errorf("expected to see at least one EasyFix flag")
 	}
 }
+
+func TestClassifySQLWrapper(t *testing.T) {
+	sql := "CREATE TABLE t1(id int); INSERT INTO t1 VALUES(1)"
+	stmts, agg := ClassifySQL(DialectMySQL, sql)
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements, got %d", len(stmts))
+	}
+	if agg&(IsDDL|IsDML) != (IsDDL | IsDML) {
+		t.Fatalf("expected aggregate to include DDL and DML, got 0x%x", agg)
+	}
+	// Postgres path trivial smoke
+	pstmts, pagg := ClassifySQL(DialectPostgres, "CREATE TABLE t2(id int)")
+	if len(pstmts) != 1 || pagg&IsDDL == 0 {
+		t.Fatalf("expected ddl classification via postgres path")
+	}
+}

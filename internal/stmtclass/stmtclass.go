@@ -189,6 +189,22 @@ func ClassifyScript(ts sqltoken.Tokens) (stmts []StatementFlags, aggregate uint3
 	return ClassifyTokens(DialectMySQL, ts)
 }
 
+// ClassifySQL is a convenience helper that tokenizes raw SQL text according to the
+// specified dialect and then classifies it. Prefer ClassifyTokens when you already
+// have tokenized input (to avoid re-tokenization overhead).
+// NOTE: For DialectMySQL & DialectPostgres we leverage dialect-specific tokenizers
+// from sqltoken to ensure correct splitting and comment stripping semantics.
+func ClassifySQL(d Dialect, sql string) (stmts []StatementFlags, aggregate uint32) {
+	switch d {
+	case DialectMySQL:
+		return ClassifyTokens(d, sqltoken.TokenizeMySQL(sql))
+	case DialectPostgres:
+		return ClassifyTokens(d, sqltoken.TokenizePostgreSQL(sql))
+	default: // fallback to MySQL tokenizer as a reasonable default
+		return ClassifyTokens(DialectMySQL, sqltoken.TokenizeMySQL(sql))
+	}
+}
+
 // ifExistsRE duplicated from stmtcheck to avoid circular dependency.
 // Keep regex identical; tests will enforce behavior.
 // (?i) case-insensitive; matches IF EXISTS or IF NOT EXISTS

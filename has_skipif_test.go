@@ -9,8 +9,8 @@ import (
 	"github.com/muir/libschema/lspostgres"
 )
 
-// TestHasSkipIf ensures the HasSkipIf branch is covered.
-// fakeMigration is a lightweight migration to test options wiring.
+// TestHasSkipIf ensures the HasSkipIf branch is covered. fakeMigration is a lightweight
+// migration to test options wiring.
 
 func TestHasSkipIf(t *testing.T) {
 	m := lspostgres.Script("S", "SELECT 1", libschema.SkipIf(func() (bool, error) { return false, nil }))

@@ -9,9 +9,7 @@ import (
 	"github.com/muir/libschema/internal"
 )
 
-// Sentinel errors promoted from legacy classification logic (previously in the
-// removed internal/stmtcheck package, now handled by internal/stmtclass). They may
-// be returned (wrapped) by drivers or helper validation when a migration mixes
+// Sentinel errors returned (wrapped) by drivers or validation when a migration mixes
 // disallowed statement types or includes easily-idempotent-but-unguarded DDL.
 //
 // ErrDataAndDDL: a script mixes schema changing (DDL) and data manipulation (DML)

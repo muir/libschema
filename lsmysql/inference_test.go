@@ -46,14 +46,8 @@ func TestGenerateInference(t *testing.T) {
 	dbase.Migrations("L1", mTx, mDB)
 	require.NoError(t, s.Migrate(context.Background()))
 
-	if mTx.Base().NonTransactional() {
-		// Transactional inference failed
-		// Provide clear diagnostic
-		panic("Generate[*sql.Tx] incorrectly inferred non-transactional")
-	}
-	if !mDB.Base().NonTransactional() {
-		panic("Generate[*sql.DB] did not infer non-transactional")
-	}
+	require.False(t, mTx.Base().NonTransactional(), "Generate[*sql.Tx] incorrectly inferred non-transactional")
+	require.True(t, mDB.Base().NonTransactional(), "Generate[*sql.DB] did not infer non-transactional")
 }
 
 // TestComputedInference mirrors TestGenerateInference for Computed
@@ -76,15 +70,9 @@ func TestComputedInference(t *testing.T) {
 	dbase.Migrations("L1", cTx, cDB)
 	require.NoError(t, s.Migrate(context.Background()))
 
-	if !calledTx || !calledDB {
-		panic("computed migrations not both invoked")
-	}
-	if cTx.Base().NonTransactional() {
-		panic("Computed[*sql.Tx] incorrectly inferred non-transactional")
-	}
-	if !cDB.Base().NonTransactional() {
-		panic("Computed[*sql.DB] did not infer non-transactional")
-	}
+	require.True(t, calledTx && calledDB, "computed migrations not both invoked")
+	require.False(t, cTx.Base().NonTransactional(), "Computed[*sql.Tx] incorrectly inferred non-transactional")
+	require.True(t, cDB.Base().NonTransactional(), "Computed[*sql.DB] did not infer non-transactional")
 }
 
 // TestForceOverride validates ForceTransactional / ForceNonTransactional override inference.
@@ -107,13 +95,7 @@ func TestForceOverride(t *testing.T) {
 	dbase.Migrations("L1", forcedTx, forcedNonTx, lastWins)
 	require.NoError(t, s.Migrate(context.Background()))
 
-	if forcedTx.Base().NonTransactional() {
-		panic("ForceTransactional failed to override non-tx inference")
-	}
-	if !forcedNonTx.Base().NonTransactional() {
-		panic("ForceNonTransactional failed to override tx inference")
-	}
-	if !lastWins.Base().NonTransactional() {
-		panic("last override (ForceNonTransactional) did not win")
-	}
+	require.False(t, forcedTx.Base().NonTransactional(), "ForceTransactional failed to override non-tx inference")
+	require.True(t, forcedNonTx.Base().NonTransactional(), "ForceNonTransactional failed to override tx inference")
+	require.True(t, lastWins.Base().NonTransactional(), "last override (ForceNonTransactional) did not win")
 }

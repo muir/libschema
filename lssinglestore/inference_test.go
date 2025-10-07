@@ -41,12 +41,8 @@ func TestGenerateInference(t *testing.T) {
 
 	dbase.Migrations("L1", mTx, mDB)
 	require.NoError(t, s.Migrate(context.Background()))
-	if mTx.Base().NonTransactional() {
-		panic("Generate[*sql.Tx] incorrectly inferred non-tx (SingleStore)")
-	}
-	if !mDB.Base().NonTransactional() {
-		panic("Generate[*sql.DB] did not infer non-tx (SingleStore)")
-	}
+	require.False(t, mTx.Base().NonTransactional(), "Generate[*sql.Tx] incorrectly inferred non-tx (SingleStore)")
+	require.True(t, mDB.Base().NonTransactional(), "Generate[*sql.DB] did not infer non-tx (SingleStore)")
 }
 
 func TestComputedInference(t *testing.T) {
@@ -67,15 +63,9 @@ func TestComputedInference(t *testing.T) {
 
 	dbase.Migrations("L1", cTx, cDB)
 	require.NoError(t, s.Migrate(context.Background()))
-	if !calledTx || !calledDB {
-		panic("computed migrations not both invoked (SingleStore)")
-	}
-	if cTx.Base().NonTransactional() {
-		panic("Computed[*sql.Tx] incorrectly inferred non-tx (SingleStore)")
-	}
-	if !cDB.Base().NonTransactional() {
-		panic("Computed[*sql.DB] did not infer non-tx (SingleStore)")
-	}
+	require.True(t, calledTx && calledDB, "computed migrations not both invoked (SingleStore)")
+	require.False(t, cTx.Base().NonTransactional(), "Computed[*sql.Tx] incorrectly inferred non-tx (SingleStore)")
+	require.True(t, cDB.Base().NonTransactional(), "Computed[*sql.DB] did not infer non-tx (SingleStore)")
 }
 
 func TestForceOverride(t *testing.T) {
@@ -95,13 +85,7 @@ func TestForceOverride(t *testing.T) {
 
 	dbase.Migrations("L1", forcedTx, forcedNonTx, lastWins)
 	require.NoError(t, s.Migrate(context.Background()))
-	if forcedTx.Base().NonTransactional() {
-		panic("ForceTransactional failed (SingleStore)")
-	}
-	if !forcedNonTx.Base().NonTransactional() {
-		panic("ForceNonTransactional failed (SingleStore)")
-	}
-	if !lastWins.Base().NonTransactional() {
-		panic("last override did not win (SingleStore)")
-	}
+	require.False(t, forcedTx.Base().NonTransactional(), "ForceTransactional failed (SingleStore)")
+	require.True(t, forcedNonTx.Base().NonTransactional(), "ForceNonTransactional failed (SingleStore)")
+	require.True(t, lastWins.Base().NonTransactional(), "last override did not win (SingleStore)")
 }
