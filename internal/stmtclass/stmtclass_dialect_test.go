@@ -52,5 +52,5 @@ func TestGuardInStringLiteral(t *testing.T) {
 	_, agg := ClassifyTokens(DialectMySQL, toks)
 	// Because regex matches inside literals, current behavior will incorrectly drop NonIdempotent flag.
 	// We assert current (permissive) behavior to lock it; consider tightening in future.
-	require.Falsef(t, agg&IsNonIdempotent != 0, "expected idempotent classification due to naive regex, got non-idempotent flags=0x%x", agg)
+	require.Zero(t, agg&IsNonIdempotent, "expected idempotent classification due to naive regex, got non-idempotent flags=0x%x", agg)
 }

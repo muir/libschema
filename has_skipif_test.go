@@ -14,11 +14,7 @@ import (
 
 func TestHasSkipIf(t *testing.T) {
 	m := lspostgres.Script("S", "SELECT 1", libschema.SkipIf(func() (bool, error) { return false, nil }))
-	if !m.Base().HasSkipIf() {
-		require.FailNow(t, "expected HasSkipIf to be true")
-	}
+	require.True(t, m.Base().HasSkipIf(), "expected HasSkipIf to be true")
 	m2 := lspostgres.Script("S2", "SELECT 1", libschema.SkipRemainingIf(func() (bool, error) { return false, nil }))
-	if m2.Base().HasSkipIf() {
-		require.FailNow(t, "SkipRemainingIf should not set skipIf predicate")
-	}
+	require.False(t, m2.Base().HasSkipIf(), "SkipRemainingIf should not set skipIf predicate")
 }

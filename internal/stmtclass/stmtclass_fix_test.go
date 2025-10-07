@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/muir/sqltoken"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEasilyIdempotentFixFlag(t *testing.T) {
@@ -19,27 +21,11 @@ func TestEasilyIdempotentFixFlag(t *testing.T) {
 		{"alter table add col", "ALTER TABLE t1 ADD COLUMN c2 int", false, true},
 	}
 	for _, c := range cases {
-		// naive dialect choice: MySQL tokenizer is fine for these generic statements
-		// (merged declaration+assignment to satisfy staticcheck S1021)
 		toks := sqltoken.TokenizeMySQL(c.sql)
 		stmts, _ := ClassifyScript(toks)
-		if len(stmts) != 1 {
-			t.Fatalf("expected 1 stmt for %s", c.name)
-		}
+		require.Len(t, stmts, 1, c.name)
 		got := stmts[0].Flags
-		if (got&IsEasilyIdempotentFix != 0) != c.wantEasy {
-			if c.wantEasy {
-				t.Errorf("%s: expected IsEasilyIdempotentFix set", c.name)
-			} else {
-				t.Errorf("%s: expected IsEasilyIdempotentFix not set", c.name)
-			}
-		}
-		if (got&IsNonIdempotent != 0) != c.wantNonIdem {
-			if c.wantNonIdem {
-				t.Errorf("%s: expected IsNonIdempotent set", c.name)
-			} else {
-				t.Errorf("%s: expected IsNonIdempotent not set", c.name)
-			}
-		}
+		assert.Equalf(t, c.wantEasy, got&IsEasilyIdempotentFix != 0, "%s: easy-fix flag mismatch", c.name)
+		assert.Equalf(t, c.wantNonIdem, got&IsNonIdempotent != 0, "%s: non-idempotent flag mismatch", c.name)
 	}
 }

@@ -1,7 +1,6 @@
 package lspostgres
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,10 +20,9 @@ func TestParsePostgresServerVersion(t *testing.T) {
 		{"garbage", 0, 0},
 		{"", 0, 0},
 	}
-	for i, c := range cases {
+	for _, c := range cases {
 		maj, min := parsePostgresServerVersion(c.in)
-		if maj != c.major || min != c.minor {
-			require.FailNow(t, fmt.Sprintf("case %d: input=%q got %d.%d want %d.%d", i, c.in, maj, min, c.major, c.minor))
-		}
+		require.Equalf(t, c.major, maj, "major mismatch for input %q", c.in)
+		require.Equalf(t, c.minor, min, "minor mismatch for input %q", c.in)
 	}
 }

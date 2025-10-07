@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/muir/sqltoken"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestAdditionalVerbCoverage exercises remaining first-token switch arms in ClassifyTokens
@@ -31,9 +33,7 @@ func TestAdditionalVerbCoverage(t *testing.T) {
 	for _, c := range cases {
 		toks := sqltoken.TokenizeMySQL(c.sql)
 		_, agg := ClassifyTokens(DialectMySQL, toks)
-		if agg != c.want {
-			t.Errorf("%s: got 0x%x want 0x%x", c.name, agg, c.want)
-		}
+		assert.Equalf(t, c.want, agg, "%s: flags", c.name)
 	}
 }
 
@@ -42,12 +42,8 @@ func TestFlagNamesAndSummarize(t *testing.T) {
 	toks := sqltoken.TokenizeMySQL(sql)
 	stmts, agg := ClassifyTokens(DialectMySQL, toks)
 	sum := SummarizeStatements(stmts, agg)
-	if !sum.HasDDL || !sum.HasDML {
-		t.Fatalf("expected both DDL and DML in summary: %+v", sum)
-	}
-	if sum.FirstNonIdempotentDDL == "" {
-		t.Fatalf("expected first non-idempotent DDL captured")
-	}
+	require.True(t, sum.HasDDL && sum.HasDML, "expected both DDL and DML in summary: %+v", sum)
+	require.NotEmpty(t, sum.FirstNonIdempotentDDL, "expected first non-idempotent DDL captured")
 	names := FlagNames(agg)
 	// Ensure expected flag name presence (Multi, DDL, DML, NonIdem due to DROP unguarded)
 	required := map[string]bool{"DDL": false, "DML": false, "Multi": false, "NonIdem": false}
@@ -57,9 +53,7 @@ func TestFlagNamesAndSummarize(t *testing.T) {
 		}
 	}
 	for k, v := range required {
-		if !v {
-			t.Errorf("missing flag name %s in %v", k, names)
-		}
+		assert.Truef(t, v, "missing flag name %s in %v", k, names)
 	}
 	// EasyFix presence depends on create/drop classification; assert at least one statement has EasyFix when raw CREATE TABLE without IF NOT EXISTS or DROP TABLE
 	var sawEasy bool
@@ -69,23 +63,16 @@ func TestFlagNamesAndSummarize(t *testing.T) {
 			break
 		}
 	}
-	if !sawEasy {
-		t.Errorf("expected to see at least one EasyFix flag")
-	}
+	assert.True(t, sawEasy, "expected to see at least one EasyFix flag")
 }
 
 func TestClassifySQLWrapper(t *testing.T) {
 	sql := "CREATE TABLE t1(id int); INSERT INTO t1 VALUES(1)"
 	stmts, agg := ClassifySQL(DialectMySQL, sql)
-	if len(stmts) != 2 {
-		t.Fatalf("expected 2 statements, got %d", len(stmts))
-	}
-	if agg&(IsDDL|IsDML) != (IsDDL | IsDML) {
-		t.Fatalf("expected aggregate to include DDL and DML, got 0x%x", agg)
-	}
+	require.Len(t, stmts, 2)
+	require.Equal(t, IsDDL|IsDML|IsMultipleStatements, agg&(IsDDL|IsDML|IsMultipleStatements))
 	// Postgres path trivial smoke
 	pstmts, pagg := ClassifySQL(DialectPostgres, "CREATE TABLE t2(id int)")
-	if len(pstmts) != 1 || pagg&IsDDL == 0 {
-		t.Fatalf("expected ddl classification via postgres path")
-	}
+	require.Len(t, pstmts, 1)
+	require.NotZero(t, pagg&IsDDL)
 }

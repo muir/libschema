@@ -1,3 +1,6 @@
+// Package stmtclass performs lightweight SQL statement classification used internally
+// to enforce migration safety (idempotency, mixed DDL/DML detection). It is intentionally
+// narrow in scope: it does not parse full SQL grammar.
 package stmtclass
 
 import (
@@ -205,7 +208,7 @@ func ClassifySQL(d Dialect, sql string) (stmts []StatementFlags, aggregate uint3
 	}
 }
 
-// ifExistsRE duplicated from stmtcheck to avoid circular dependency.
-// Keep regex identical; tests will enforce behavior.
+// ifExistsRE matches IF EXISTS / IF NOT EXISTS (case-insensitive) used to identify
+// guarded DDL statements for idempotency classification.
 // (?i) case-insensitive; matches IF EXISTS or IF NOT EXISTS
 var ifExistsRE = regexp.MustCompile(`(?i)\bIF\s+(?:NOT\s+)?EXISTS\b`)

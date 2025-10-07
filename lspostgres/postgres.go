@@ -309,7 +309,6 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				if len(cmds) != 1 {
 					return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement (convert to Computed[*sql.DB] for complex logic)", m.Base().Name)
 				}
-				// New dialect-aware classification replaces legacy AnalyzeTokens.
 				stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectPostgres, ts)
 				if agg&stmtclass.IsMultipleStatements != 0 || len(stmts) != 1 { // defensive; parser split above should already enforce 1
 					return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement", m.Base().Name)

@@ -116,7 +116,6 @@ func TestBadMigrationsPostgres(t *testing.T) {
 			},
 		},
 		// Add sentinel-based validation cases (non-idempotent / mixes data & DDL) formerly enforced
-		// by legacy stmtcheck (now handled by dialect-aware stmtclass classifier)
 		{
 			name:     "non idempotent",
 			sentinel: libschema.ErrNonIdempotentNonTx,
