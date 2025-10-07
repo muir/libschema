@@ -65,8 +65,14 @@ type MigrationBase struct {
 	skipIf           func() (bool, error)
 	skipRemainingIf  func() (bool, error)
 	repeatUntilNoOp  bool
-	nonTransactional bool // set automatically based on migration function generic type (TxLike vs not)
+	nonTransactional bool // set automatically or by ForceNonTransactional / inference
+	forcedTx         bool // true only if ForceTransactional explicitly requested
 }
+
+// ApplyForceOverride central place to enforce mutually exclusive overrides.
+// Setting tx=true records an explicit transactional request; tx=false clears that request.
+// (ForceNonTransactional separately sets nonTransactional=true.)
+func (m *MigrationBase) ApplyForceOverride(tx bool) { m.forcedTx = tx }
 
 func (m MigrationBase) Copy() MigrationBase {
 	if m.rawAfter != nil {
@@ -325,6 +331,9 @@ func (m *MigrationBase) NonTransactional() bool {
 func (m *MigrationBase) SetNonTransactional(v bool) {
 	m.nonTransactional = v
 }
+
+// ForcedTransactional reports if ForceTransactional() was explicitly called.
+func (m *MigrationBase) ForcedTransactional() bool { return m.forcedTx }
 
 func (n MigrationName) String() string {
 	return n.Library + ": " + n.Name

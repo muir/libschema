@@ -221,38 +221,42 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 	var res sql.Result
 
 	// Pre-execution downgrade: If defined via Script() (literal SQL captured) and marked transactional
-	// but contains DDL, automatically force non-transactional execution so that DDL executes safely
-	// outside a transaction (MySQL autocommit semantics). Only perform when the user did not already
-	// mark migration as NonTransactional().
+	// but contains DDL, default behavior is to force non-transactional execution (MySQL autocommits DDL).
+	// If the user explicitly used ForceTransactional(), we skip the downgrade. This is a deliberate
+	// foot-gun: DDL will still autocommit while subsequent DML (or status writes) can roll back, possibly
+	// leaving the migration recorded as incomplete even though schema changes occurred.
 	if pm.scriptSQL != "" && !pm.NonTransactional() && pm.scriptTx != nil {
-		if toks := sqltoken.TokenizeMySQL(pm.scriptSQL); true {
-			stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, toks)
-			if log != nil && d.Options.DebugLogging {
-				for i, s := range stmts {
-					log.Debug("classification stmt", map[string]interface{}{"phase": "pre-downgrade", "index": i, "text": s.Text, "flags": stmtclass.FlagNames(s.Flags)})
-				}
-				log.Debug("classification aggregate", map[string]interface{}{"phase": "pre-downgrade", "flags": stmtclass.FlagNames(agg), "sql": pm.scriptSQL})
+		toks := sqltoken.TokenizeMySQL(pm.scriptSQL)
+		stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, toks)
+		if log != nil && d.Options.DebugLogging {
+			for i, s := range stmts {
+				log.Debug("classification stmt", map[string]interface{}{"phase": "pre-downgrade", "index": i, "text": s.Text, "flags": stmtclass.FlagNames(s.Flags)})
 			}
-			sum := stmtclass.SummarizeStatements(stmts, agg)
-			if sum.HasDDL { // downgrade for any DDL presence
+			log.Debug("classification aggregate", map[string]interface{}{"phase": "pre-downgrade", "flags": stmtclass.FlagNames(agg), "sql": pm.scriptSQL})
+		}
+		sum := stmtclass.SummarizeStatements(stmts, agg)
+		if sum.HasDDL { // downgrade for any DDL presence unless user explicitly forced transactional
+			if pm.Base().ForcedTransactional() { // respect explicit ForceTransactional
+				// Leave as transactional (even though MySQL autocommits DDL); user requested it.
+			} else {
 				pm.SetNonTransactional(true)
 				pm.scriptDB = func(_ context.Context, _ *sql.DB) (string, error) { return pm.scriptSQL, nil }
 				pm.scriptTx = nil
-				if sum.HasDDL && sum.HasDML {
-					pm.creationErr = errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
-				} else {
-					if sum.FirstNonIdempotentDDL != "" {
-						pm.hasNonIdempotentDDL = true
-						if pm.scriptSQL != "" && !pm.Base().HasSkipIf() {
-							pm.unguardedNonIdempotentDDL = true
-						}
+			}
+			if sum.HasDDL && sum.HasDML {
+				pm.creationErr = errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
+			} else {
+				if sum.FirstNonIdempotentDDL != "" {
+					pm.hasNonIdempotentDDL = true
+					if pm.scriptSQL != "" && !pm.Base().HasSkipIf() {
+						pm.unguardedNonIdempotentDDL = true
 					}
-					if pm.creationErr == nil {
-						for _, s := range stmts {
-							if s.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix | stmtclass.IsNonIdempotent) {
-								pm.creationErr = errors.Errorf("non-idempotent DDL '%s': %w", s.Text, libschema.ErrNonIdempotentDDL)
-								break
-							}
+				}
+				if pm.creationErr == nil {
+					for _, s := range stmts {
+						if s.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix | stmtclass.IsNonIdempotent) {
+							pm.creationErr = errors.Errorf("non-idempotent DDL '%s': %w", s.Text, libschema.ErrNonIdempotentDDL)
+							break
 						}
 					}
 				}

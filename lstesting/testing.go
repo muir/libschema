@@ -40,8 +40,8 @@ func FakeSchema(t T, cascade string) (libschema.Options, func(db *sql.DB)) {
 					return
 				}
 				_, err := db.Exec(`DROP SCHEMA IF EXISTS ` + schemaName + ` ` + cascade)
+				assert.NoErrorf(t, err, "drop schema %s", schemaName)
 				t.Logf("DROPPED %s", schemaName)
-				assert.NoError(t, err, "drop schema")
 			}
 		}
 }

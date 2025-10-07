@@ -97,7 +97,7 @@ func (f *Finalizer[DB, TX]) Run() (finalErr error) {
 				return
 			}
 			stx = st
-			// fianlErr must be the bodyErr or the error from committing the change -- in
+			// finalErr must be the bodyErr or the error from committing the change -- in
 			// either case, the status is failed if finalErr is not nil
 			if err := f.SaveStatusSeparate(f.Ctx, stx, finalErr); err != nil {
 				if finalErr == nil {

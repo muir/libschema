@@ -130,7 +130,6 @@ var baseNonTxStmtRegex = func() []*regexp.Regexp { // initial full set
 // patterns that are not needed for newer versions (e.g., ALTER TYPE ADD VALUE >= 12).
 func (p *Postgres) adjustNonTxForVersion(major int) {
 	filtered := p.nonTxStmtRegex[:0]
-	filtered = filtered[:0]
 	for _, g := range nonTxGroups {
 		if g.dropAtMajor != 0 && major >= g.dropAtMajor {
 			continue
