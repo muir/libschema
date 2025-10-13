@@ -173,8 +173,11 @@ func getDSN(t *testing.T) string {
 	return dsn
 }
 
-func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expectAsync bool, code *string, code2 *string, overrides *libschema.OverrideOptions) (*sql.DB, error) {
+func init() {
 	internal.TestingMode = true // panic instead of os.Exit()
+}
+
+func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expectAsync bool, code *string, code2 *string, overrides *libschema.OverrideOptions) (*sql.DB, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, errors.Wrap(err, "open")

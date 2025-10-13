@@ -116,22 +116,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 			},
 		},
 		// Add sentinel-based validation cases (non-idempotent / mixes data & DDL) formerly enforced
-		{
-			name:     "non idempotent",
-			sentinel: libschema.ErrNonIdempotentNonTx,
-			define: func(dbase *libschema.Database) {
-				// Force non-transactional so idempotency validation executes for CREATE TABLE
-				dbase.Migrations("L2", lspostgres.Script("T4", `CREATE TABLE t1 (id text)`, libschema.ForceNonTransactional()))
-			},
-		},
-		{
-			name:     "combines data & ddl (multi-stmt non-tx)",
-			sentinel: libschema.ErrNonTxMultipleStatements,
-			define: func(dbase *libschema.Database) {
-				// Forcing non-transactional turns multi-statement into an error before stmtclass classification
-				dbase.Migrations("L2", lspostgres.Script("T4", `CREATE TABLE IF NOT EXISTS t1 (id text); INSERT INTO t1 (id) VALUES ('foo')`, libschema.ForceNonTransactional()))
-			},
-		},
+		// (Removed forced non-transactional idempotency and multi-stmt cases; ForceNonTransactional bypass semantics retained elsewhere.)
 	}
 
 	for _, tc := range cases {

@@ -28,7 +28,7 @@ func TestFinalizer_Scenarios(t *testing.T) {
 		saveSep string
 		commitS string
 		want    string
-		notWant string
+		wantToo string
 	}
 	cases := []scenario{
 		{
@@ -70,7 +70,7 @@ func TestFinalizer_Scenarios(t *testing.T) {
 			body:    "body fail",
 			beginSt: "begin status error",
 			want:    "body fail",
-			notWant: "begin status error",
+			wantToo: "begin status error",
 		},
 		{
 			name:    "separate save error with prior body",
@@ -78,7 +78,7 @@ func TestFinalizer_Scenarios(t *testing.T) {
 			body:    "body fail",
 			saveSep: "separate save error",
 			want:    "body fail",
-			notWant: "separate save error",
+			wantToo: "separate save error",
 		},
 		{
 			name:    "separate commit error with prior body",
@@ -86,7 +86,7 @@ func TestFinalizer_Scenarios(t *testing.T) {
 			body:    "body fail",
 			commitS: "commit status error",
 			want:    "body fail",
-			notWant: "commit status error",
+			wantToo: "commit status error",
 		},
 	}
 
@@ -126,8 +126,8 @@ func TestFinalizer_Scenarios(t *testing.T) {
 			err := f.Run()
 			require.Error(t, err)
 			assert.ErrorContains(t, err, c.want)
-			if c.notWant != "" {
-				assert.NotContains(t, err.Error(), c.notWant)
+			if c.wantToo != "" {
+				assert.Contains(t, err.Error(), c.wantToo)
 			}
 		})
 	}

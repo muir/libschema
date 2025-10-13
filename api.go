@@ -9,15 +9,22 @@ import (
 	"github.com/muir/libschema/internal"
 )
 
-// Sentinel errors returned (wrapped) when migrations are unsafe.
-//
-// ErrDataAndDDL indicates a single migration mixes schema changes (DDL) and data
-// manipulation (DML) where that combination is disallowed.
-// ErrNonIdempotentDDL indicates a non-transactional migration contains easily
-// guardable DDL lacking an IF (NOT) EXISTS clause.
-var (
-	ErrDataAndDDL       errors.String = "migration combines DDL (schema changes) and data manipulation"
+const (
+	// ErrDataAndDDL indicates a single migration mixes schema changes (DDL) and data
+	// manipulation (DML) where that combination is disallowed.
+	ErrDataAndDDL errors.String = "migration combines DDL (schema changes) and data manipulation"
+
+	// ErrNonIdempotentDDL indicates a non-transactional migration contains easily
+	// guardable DDL lacking an IF (NOT) EXISTS clause.
 	ErrNonIdempotentDDL errors.String = "unconditional migration has non-idempotent DDL"
+
+	// ErrNonTxMultipleStatements indicates a non-transactional (idempotent) script migration
+	// attempted to execute multiple SQL statements when only one is allowed.
+	ErrNonTxMultipleStatements errors.String = "non-transactional migration has multiple statements"
+
+	// ErrNonIdempotentNonTx indicates a required-to-be-idempotent non-transactional migration
+	// failed idempotency validation heuristics.
+	ErrNonIdempotentNonTx errors.String = "non-idempotent non-transactional migration"
 )
 
 const DefaultTrackingTable = "libschema.migration_status"
@@ -65,14 +72,9 @@ type MigrationBase struct {
 	skipIf           func() (bool, error)
 	skipRemainingIf  func() (bool, error)
 	repeatUntilNoOp  bool
-	nonTransactional bool // set automatically or by ForceNonTransactional / inference
-	forcedTx         bool // true only if ForceTransactional explicitly requested
+	nonTransactional bool  // set automatically or by ForceNonTransactional / inference
+	forcedTx         *bool // if not nil, explicitly chosen transactional mode (true=transactional, false=non-transactional)
 }
-
-// ApplyForceOverride central place to enforce mutually exclusive overrides.
-// Setting tx=true records an explicit transactional request; tx=false clears that request.
-// (ForceNonTransactional separately sets nonTransactional=true.)
-func (m *MigrationBase) ApplyForceOverride(tx bool) { m.forcedTx = tx }
 
 func (m MigrationBase) Copy() MigrationBase {
 	if m.rawAfter != nil {
@@ -275,6 +277,55 @@ func SkipRemainingIf(pred func() (bool, error)) MigrationOption {
 	}
 }
 
+// ForceNonTransactional forces a migration (Script, Generate, or Computed) to run without
+// a wrapping transaction. By using this you assert the migration is idempotent (safe to retry).
+// Overrides any automatic inference the driver would normally perform.
+//
+// Generate note: For Generate[*sql.Tx] this is INVALID (generator needs *sql.Tx); applying it
+// yields a construction error. For Generate[*sql.DB] this is a no-op (already non-transactional).
+func ForceNonTransactional() MigrationOption {
+	return func(m Migration) {
+		b := m.Base()
+		v := false // false means non-transactional
+		b.forcedTx = &v
+	}
+}
+
+// ForceTransactional forces a migration to run inside a transaction even if automatic inference
+// would choose non-transactional execution.
+//
+// Generate note: For Generate[*sql.DB] this is INVALID (cannot retroactively provide *sql.Tx
+// to the generator) and produces a construction error. For Generate[*sql.Tx] this is a no-op
+// (already transactional).
+//
+// WARNING (foot-gun): On MySQL / SingleStore this DOES NOT make DDL atomic. Those engines
+// autocommit each DDL statement regardless of any BEGIN you issue. By forcing transactional mode:
+//   - Earlier DML in the same migration may roll back while preceding DDL remains applied.
+//   - The bookkeeping UPDATE that records migration completion can fail while schema changes
+//     have already been partially or fully applied (leaving the migration marked incomplete and
+//     retried later against an already-changed schema).
+//   - Mixed DDL + DML ordering inside a forced transactional migration can produce inconsistent,
+//     misleading results during retries or partial failures.
+//
+// Use this only if you fully understand these semantics and prefer to retain a transactional wrapper
+// for non-DDL statements. If you simply need safe DDL, prefer writing idempotent statements and let
+// the driver downgrade automatically.
+func ForceTransactional() MigrationOption {
+	return func(m Migration) {
+		b := m.Base()
+		v := true // true means transactional
+		b.forcedTx = &v
+	}
+}
+
+// ApplyForceOverride overrides transactionality for any prior force call (ForceTransactional
+// or ForceNonTransactional)
+func (m *MigrationBase) ApplyForceOverride() {
+	if m.forcedTx != nil { // forced override present
+		m.SetNonTransactional(!*m.forcedTx)
+	}
+}
+
 func (d *Database) DB() *sql.DB {
 	return d.db
 }
@@ -333,7 +384,10 @@ func (m *MigrationBase) SetNonTransactional(v bool) {
 }
 
 // ForcedTransactional reports if ForceTransactional() was explicitly called.
-func (m *MigrationBase) ForcedTransactional() bool { return m.forcedTx }
+func (m *MigrationBase) ForcedTransactional() bool { return m.forcedTx != nil && *m.forcedTx }
+
+// ForcedNonTransactional reports if ForceNonTransactional() was explicitly called.
+func (m *MigrationBase) ForcedNonTransactional() bool { return m.forcedTx != nil && !*m.forcedTx }
 
 func (n MigrationName) String() string {
 	return n.Library + ": " + n.Name

@@ -3,6 +3,8 @@ package migfinalize
 import (
 	"context"
 
+	"github.com/memsql/errors"
+
 	"github.com/muir/libschema/internal"
 )
 
@@ -42,7 +44,11 @@ func (f *Finalizer[DB, TX]) Run() (finalErr error) {
 	var committed bool
 	var stx *TX // separate status tx (nil if not opened)
 	var statusCommitted bool
+
+	// finalErr is the combo of all of these
 	var bodyErr error
+	var txErr error
+	var tx2Err error
 
 	defer func() {
 		if tx != nil && !committed {
@@ -64,20 +70,20 @@ func (f *Finalizer[DB, TX]) Run() (finalErr error) {
 		}
 	}()
 
+	defer func() {
+		finalErr = errors.Join(bodyErr, txErr, tx2Err)
+	}()
+
 	// commit / status persistence
 	defer func() {
-		if finalErr == nil {
-			finalErr = bodyErr
+		if txErr != nil {
+			return
 		}
 
 		// Attempt in-tx finalize
-		if f.RunTransactional && tx != nil {
-			if bodyErr == nil {
-				if err := f.SaveStatusInTx(f.Ctx, tx); err != nil {
-					finalErr = err
-				} else if err := f.CommitTx(tx); err != nil {
-					finalErr = err
-				} else {
+		if f.RunTransactional && tx != nil && bodyErr == nil {
+			if txErr = f.SaveStatusInTx(f.Ctx, tx); txErr == nil {
+				if txErr = f.CommitTx(tx); txErr == nil {
 					committed = true
 					return // Success path complete; no separate status tx
 				}
@@ -86,33 +92,14 @@ func (f *Finalizer[DB, TX]) Run() (finalErr error) {
 
 		// Need separate status tx if non-tx path OR transactional attempt not committed
 		if !f.RunTransactional || !committed {
-			st, err := f.BeginStatusTx(f.Ctx, f.DB)
-			if err != nil {
-				// only persist this error if finalErr is not set
-				if finalErr == nil {
-					finalErr = err
-				} else {
-					f.Log.Error("secondary status begin error", map[string]interface{}{"error": err.Error()})
-				}
+			if stx, tx2Err = f.BeginStatusTx(f.Ctx, f.DB); tx2Err != nil {
 				return
 			}
-			stx = st
-			// finalErr must be the bodyErr or the error from committing the change -- in
-			// either case, the status is failed if finalErr is not nil
-			if err := f.SaveStatusSeparate(f.Ctx, stx, finalErr); err != nil {
-				if finalErr == nil {
-					finalErr = err
-				} else {
-					f.Log.Error("secondary status save error", map[string]interface{}{"error": err.Error()})
-				}
+			joinedErr := errors.Join(bodyErr, txErr) // failed if not nil
+			if tx2Err = f.SaveStatusSeparate(f.Ctx, stx, joinedErr); tx2Err != nil {
 				return
 			}
-			if err := f.CommitStatusTx(stx); err != nil {
-				if finalErr == nil {
-					finalErr = err
-				} else {
-					f.Log.Error("secondary status commit error", map[string]interface{}{"error": err.Error()})
-				}
+			if tx2Err = f.CommitStatusTx(stx); tx2Err != nil {
 				return
 			}
 			statusCommitted = true
@@ -121,14 +108,13 @@ func (f *Finalizer[DB, TX]) Run() (finalErr error) {
 
 	// Body execution (outside finalization logic). Capture bodyErr only.
 	if f.RunTransactional {
-		t, err := f.BeginTx(f.Ctx, f.DB)
-		if err != nil {
-			return err
+		tx, txErr = f.BeginTx(f.Ctx, f.DB)
+		if txErr != nil {
+			return finalErr
 		}
-		tx = t
 		bodyErr = f.BodyTx(f.Ctx, tx)
 	} else {
 		bodyErr = f.BodyNonTx(f.Ctx, f.DB)
 	}
-	return finalErr // finalErr set in defer
+	return finalErr
 }

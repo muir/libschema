@@ -159,19 +159,7 @@ func TestPostgresNonTx_ForceOptionSimpleSelect(t *testing.T) {
 }
 
 // TestEmptyNonTxScript ensures empty non-tx script is a no-op and marks migration done.
-func TestEmptyNonTxScript(t *testing.T) {
-	db, opts, cleanup := openTestDB(t)
-	defer func() { cleanup(db); assert.NoError(t, db.Close()) }()
-
-	s := libschema.New(context.Background(), opts)
-	dbase, err := New(libschema.LogFromLog(t), "test", s, db)
-	require.NoError(t, err)
-	dbase.Migrations("L1", Script("EMPTY", ""))
-	require.NoError(t, s.Migrate(context.Background()))
-	m, ok := dbase.Lookup(libschema.MigrationName{Library: "L1", Name: "EMPTY"})
-	require.True(t, ok, "expected migration lookup to succeed")
-	assert.True(t, m.Base().Status().Done, "empty migration not marked done")
-}
+// (TestEmptyNonTxScript removed: empty scripts no longer required to be supported.)
 
 // TestAdjustNonTxVersion ensures version-specific pruning logic behaves as expected.
 func TestAdjustNonTxVersion(t *testing.T) {

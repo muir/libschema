@@ -1,16 +1,14 @@
 package lsmysql
 
 import (
-	"github.com/memsql/errors"
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal/stmtclass"
 	"github.com/muir/sqltoken"
 )
 
-// Deprecated: Use libschema.ErrDataAndDDL / libschema.ErrNonIdempotentDDL directly.
 var (
-	ErrDataAndDDL       = libschema.ErrDataAndDDL
-	ErrNonIdempotentDDL = libschema.ErrNonIdempotentDDL
+	ErrDataAndDDL       = libschema.ErrDataAndDDL       // Deprecated: use libschema.ErrDataAndDDL
+	ErrNonIdempotentDDL = libschema.ErrNonIdempotentDDL // Deprecated: use libschema.ErrNonIdempotentDDL
 )
 
 // CheckScript attempts to validate that an SQL command does not do
@@ -35,10 +33,10 @@ func CheckScript(s string) error {
 				break
 			}
 		}
-		return errors.Errorf("data command '%s' combined with DDL command '%s': %w", firstDML, firstDDL, ErrDataAndDDL)
+		return libschema.ErrDataAndDDL.Errorf("data command '%s' combined with DDL command '%s'", firstDML, firstDDL)
 	}
 	if sum.FirstNonIdempotentDDL != "" && agg&stmtclass.IsNonIdempotent != 0 {
-		return errors.Errorf("non-idempotent DDL '%s': %w", sum.FirstNonIdempotentDDL, ErrNonIdempotentDDL)
+		return libschema.ErrNonIdempotentDDL.Errorf("non-idempotent DDL '%s'", sum.FirstNonIdempotentDDL)
 	}
 	return nil
 }

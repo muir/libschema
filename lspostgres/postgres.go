@@ -57,27 +57,22 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 	return schema.NewDatabase(log, dbName, db, &Postgres{log: log, nonTxStmtRegex: append([]*regexp.Regexp{}, baseNonTxStmtRegex...)})
 }
 
-// Type aliases to central abstractions for brevity within this driver.
-type (
-	ExecConn = libschema.ExecConn
-	TxLike   = libschema.TxLike
-)
-
-// ConnPtr constrains generic migrations to only *sql.Tx or *sql.DB eliminating
-// the need for runtime type assertions in execution paths.
 type ConnPtr interface{ *sql.Tx | *sql.DB }
 
 type pmigration struct {
 	libschema.MigrationBase
 	scriptTx    func(context.Context, *sql.Tx) (string, error)
 	scriptDB    func(context.Context, *sql.DB) (string, error)
+	scriptSQL   string // raw SQL for deferred classification
 	computedTx  func(context.Context, *sql.Tx) error
 	computedDB  func(context.Context, *sql.DB) error
 	creationErr error
 }
 
 func (m *pmigration) Copy() libschema.Migration {
-	return &pmigration{MigrationBase: m.MigrationBase.Copy(), scriptTx: m.scriptTx, scriptDB: m.scriptDB, computedTx: m.computedTx, computedDB: m.computedDB, creationErr: m.creationErr}
+	n := *m
+	n.MigrationBase = m.MigrationBase.Copy()
+	return &n
 }
 
 func (m *pmigration) Base() *libschema.MigrationBase {
@@ -146,31 +141,28 @@ func (p *Postgres) adjustNonTxForVersion(major int) {
 // The choice of transactional vs non-transactional Can be overridden with
 // ForceNonTransactional() or ForceTransactional() options.
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
-	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
-	// Initial auto-classification (only sets the NonTransactional flag, deferring function assignment)
-	if parts := sqltoken.TokenizePostgreSQL(sqlText).Strip().CmdSplit().Strings(); len(parts) > 0 {
-		first := strings.ToLower(strings.TrimSpace(parts[0]))
-		for _, re := range baseNonTxStmtRegex {
-			if re.MatchString(first) {
-				pm.SetNonTransactional(true)
-				break
-			}
-		}
+	pm := &pmigration{
+		MigrationBase: libschema.MigrationBase{
+			Name: libschema.MigrationName{
+				Name: name,
+			},
+		},
+		scriptSQL: sqlText,
 	}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(m)
 	}
-	if pm.NonTransactional() {
-		pm.scriptDB = func(context.Context, *sql.DB) (string, error) { return sqlText, nil }
-	} else {
-		pm.scriptTx = func(context.Context, *sql.Tx) (string, error) { return sqlText, nil }
-	}
+
 	return m
 }
 
-// Generate defines a migration that returns a SQL string. If T implements TxLike
-// the migration is transactional; otherwise it is marked non-transactional.
+// Generate defines a migration that returns a SQL string.
+// Transactionality is fixed by the generic type parameter T:
+//   - Generate[*sql.Tx]  => transactional
+//   - Generate[*sql.DB]  => non-transactional
+//
+// The driver does not attempt to coerce or flip this at runtime; choose the type that matches the desired mode.
 func Generate[T ConnPtr](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
 	var zero T
@@ -187,6 +179,8 @@ func Generate[T ConnPtr](name string, generator func(context.Context, T) string,
 	for _, opt := range opts {
 		opt(lsm)
 	}
+	// Apply any force override prior to evaluating mismatch so forced direction is reflected in finalTx.
+	pm.ApplyForceOverride()
 	// Verify no conflicting override: expected transactional mode derives from the generic type.
 	expectedTx := !mustBeNonTransactional
 	finalTx := !pm.NonTransactional()
@@ -239,6 +233,39 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 	if p.serverMajor == 0 {
 		if maj, _ := p.ServerVersion(ctx, d.DB()); maj != 0 {
 			p.adjustNonTxForVersion(maj)
+		}
+	}
+
+	pm.ApplyForceOverride()
+
+	// Deferred non-tx decision: replicate original Script() classification using tokenizer but
+	// perform it here (after server version pruning) so we have accurate regex set.
+	// We only inspect the first command (comments stripped) – multi-statement scripts are
+	// disallowed for non-tx later; if user forces transactional we intentionally skip downgrade.
+	if pm.scriptSQL != "" {
+		if !pm.Base().ForcedTransactional() { // only attempt downgrade if user did not force transactional
+			parts := sqltoken.TokenizePostgreSQL(pm.scriptSQL).Strip().CmdSplit().Strings()
+			if len(parts) > 0 {
+				first := strings.ToLower(strings.TrimSpace(parts[0]))
+				for _, re := range p.nonTxStmtRegex { // version-adjusted subset
+					if re.MatchString(first) {
+						pm.SetNonTransactional(true)
+						pm.scriptDB = func(context.Context, *sql.DB) (string, error) { return pm.scriptSQL, nil }
+						pm.scriptTx = nil
+						break
+					}
+				}
+			}
+		}
+
+		// If downgrade logic above changed transactional mode we already set the appropriate script* closure.
+		// If neither closure set yet (no downgrade, not forced non-tx), assign transactional version now.
+		if pm.scriptTx == nil && pm.scriptDB == nil {
+			if pm.NonTransactional() { // forced non-tx (user override) but not downgraded path
+				pm.scriptDB = func(context.Context, *sql.DB) (string, error) { return pm.scriptSQL, nil }
+			} else {
+				pm.scriptTx = func(context.Context, *sql.Tx) (string, error) { return pm.scriptSQL, nil }
+			}
 		}
 	}
 
@@ -303,33 +330,37 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				if trim == "" {
 					return nil
 				}
-				ts := sqltoken.TokenizePostgreSQL(sqlText)
-				cmds := ts.Strip().CmdSplit()
-				if len(cmds) != 1 {
-					return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement (convert to Computed[*sql.DB] for complex logic)", m.Base().Name)
-				}
-				stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectPostgres, ts)
-				if agg&stmtclass.IsMultipleStatements != 0 || len(stmts) != 1 { // defensive; parser split above should already enforce 1
-					return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement", m.Base().Name)
-				}
-				f := stmts[0].Flags
-				if f&stmtclass.IsNonIdempotent != 0 {
-					if f&stmtclass.IsEasilyIdempotentFix != 0 {
-						// Easy fix (e.g. CREATE TABLE/INDEX/SEQUENCE without IF NOT EXISTS, DROP without IF EXISTS, etc.) -> hard error
-						return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent statement that is easily idempotent (add IF [NOT] EXISTS): %s", m.Base().Name, strings.TrimSpace(stmts[0].Text))
+				// If user explicitly forced non-transactional, bypass validation (single-stmt & idempotency heuristics).
+				if !pm.Base().ForcedNonTransactional() { // normal auto-downgraded non-tx path enforces safety checks
+					ts := sqltoken.TokenizePostgreSQL(sqlText)
+					cmds := ts.Strip().CmdSplit()
+					if len(cmds) != 1 {
+						return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement (convert to Computed[*sql.DB] for complex logic)", m.Base().Name)
 					}
-					// Harder to make idempotent automatically: allow but warn.
-					p.log.Warn("allowing non-transactional non-idempotent (hard-fix) statement in " + m.Base().Name.String() + ": " + strings.TrimSpace(stmts[0].Text))
-				}
-				// Retain specialized regex requirements (eg CREATE INDEX CONCURRENTLY) until folded fully into classifier.
-				lower := strings.ToLower(sqlText)
-				for _, req := range nonTxIdempotencyRequirements {
-					if req.re.MatchString(lower) && !strings.Contains(lower, req.requiredSubstr) {
-						return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s uses statement matching %q without %s (required for idempotency)", m.Base().Name, req.re.String(), req.requiredSubstr)
+					stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectPostgres, ts)
+					if agg&stmtclass.IsMultipleStatements != 0 || len(stmts) != 1 { // defensive; parser split above should already enforce 1
+						return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement", m.Base().Name)
 					}
+					f := stmts[0].Flags
+					if f&stmtclass.IsNonIdempotent != 0 {
+						if f&stmtclass.IsEasilyIdempotentFix != 0 {
+							// Easy fix (e.g. CREATE TABLE/INDEX/SEQUENCE without IF NOT EXISTS, DROP without IF EXISTS, etc.) -> hard error
+							return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent statement that is easily idempotent (add IF [NOT] EXISTS): %s", m.Base().Name, strings.TrimSpace(stmts[0].Text))
+						}
+						// Harder to make idempotent automatically: allow but warn.
+						p.log.Warn("allowing non-transactional non-idempotent (hard-fix) statement in " + m.Base().Name.String() + ": " + strings.TrimSpace(stmts[0].Text))
+					}
+					// Retain specialized regex requirements (eg CREATE INDEX CONCURRENTLY) until folded fully into classifier.
+					lower := strings.ToLower(sqlText)
+					for _, req := range nonTxIdempotencyRequirements {
+						if req.re.MatchString(lower) && !strings.Contains(lower, req.requiredSubstr) {
+							return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s uses statement matching %q without %s (required for idempotency)", m.Base().Name, req.re.String(), req.requiredSubstr)
+						}
+					}
+				} else if p.log != nil {
+					p.log.Warn("bypassing non-transactional validation due to ForceNonTransactional() on " + m.Base().Name.String())
 				}
-				var execConn ExecConn = db
-				res, err = execConn.ExecContext(ctx, sqlText)
+				res, err = db.ExecContext(ctx, sqlText)
 				if err != nil {
 					return errors.Wrap(err, sqlText)
 				}
@@ -549,7 +580,9 @@ func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ *internal.Log, 
 	if !ok {
 		return errors.Errorf("non-postgres migration %s registered with postgres migrations", migration.Base().Name)
 	}
-	if m.scriptTx != nil || m.scriptDB != nil || m.computedTx != nil || m.computedDB != nil {
+	fmt.Printf("XXX IsMigrationSupported name=%s scriptSQL.len=%d scriptTx=%v scriptDB=%v computedTx=%v computedDB=%v nonTx=%v forcedTx?=%v forcedNonTx?=%v\n",
+		m.Base().Name.Name, len(m.scriptSQL), m.scriptTx != nil, m.scriptDB != nil, m.computedTx != nil, m.computedDB != nil, m.NonTransactional(), m.ForcedTransactional(), m.ForcedNonTransactional())
+	if m.scriptTx != nil || m.scriptDB != nil || m.computedTx != nil || m.computedDB != nil || m.scriptSQL != "" {
 		return nil
 	}
 	if m.creationErr != nil {

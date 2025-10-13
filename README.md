@@ -299,7 +299,7 @@ will be clearly documented and will fail in a way that does not cause hidden pro
 For example, switching from using "flag" to using OverrideOptions will trigger
 an obvious breakage if you try to use a flag that no longer works.
 
-Anticpated changes:
+Anticipated changes:
 
 - API tweaks
 - Support for additional databases

@@ -67,6 +67,7 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 
 // Script creates a libschema.Migration from a SQL string
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
+	// Delegates to MySQL implementation which now applies ApplyForceOverride early.
 	return lsmysql.Script(name, sqlText, opts...)
 }
 
