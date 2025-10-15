@@ -26,8 +26,6 @@ func openMySQL(t *testing.T) *sql.DB {
 	return db
 }
 
-// TestGenerateInference ensures Generate infers transactional when *sql.Tx used and non-tx when *sql.DB
-
 // TestComputedInference mirrors TestGenerateInference for Computed
 func TestComputedInference(t *testing.T) {
 	t.Parallel()

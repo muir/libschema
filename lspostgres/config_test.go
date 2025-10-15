@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/memsql/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/memsql/errors"
 
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"

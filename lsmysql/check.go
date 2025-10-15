@@ -11,9 +11,7 @@ var (
 	ErrNonIdempotentDDL = libschema.ErrNonIdempotentDDL // Deprecated: use libschema.ErrNonIdempotentDDL
 )
 
-// CheckScript is deprecated. It performed mixed DDL/DML and non-idempotent DDL detection
-// for MySQL statements. Drivers now perform this logic inline using stmtclass.
-// Deprecated: prefer directly using stmtclass.ClassifyTokens and driver-specific validation.
+// Deprecated: no longer a supported API
 func CheckScript(s string) error {
 	ts := sqltoken.TokenizeMySQL(s)
 	stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, 0, ts)

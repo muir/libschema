@@ -43,18 +43,15 @@ import (
 // SchemaOverride be set when creating the libschema.Schema object.  That SchemaOverride will
 // be propagated into the MySQL object and be used as a default table for all of the
 // functions to interrogate data defintion status.
-type (
-	ConnPtr interface{ *sql.Tx | *sql.DB }
-	MySQL   struct {
-		lockTx              *sql.Tx
-		lockStr             string
-		db                  *sql.DB
-		databaseName        string
-		lock                sync.Mutex
-		trackingSchemaTable func(*libschema.Database) (string, string, string, error)
-		skipDatabase        bool
-	}
-)
+type MySQL struct {
+	lockTx              *sql.Tx
+	lockStr             string
+	db                  *sql.DB
+	databaseName        string
+	lock                sync.Mutex
+	trackingSchemaTable func(*libschema.Database) (string, string, string, error)
+	skipDatabase        bool
+}
 
 // applySchemaOverrideMySQL sets the database (schema) for the current connection/transaction
 // if override is non-empty. It validates identifier simplicity. Works with either *sql.Tx
@@ -109,8 +106,7 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB,
 
 type mmigration struct {
 	libschema.MigrationBase
-	scriptSQL string
-	// genFn always has the newer (string, error) signature internally.
+	scriptSQL  string
 	genFn      func(context.Context, *sql.Tx) (string, error)
 	computedTx func(context.Context, *sql.Tx) error
 	computedDB func(context.Context, *sql.DB) error
@@ -145,9 +141,7 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 // unless ForceTransactional() was specified (which causes an error). For
 // unconditional non-transactional work prefer Script (with prewritten SQL) or a
 // Computed[*sql.DB] migration.
-// Generate is the legacy form that accepts a generator which returns only a string.
-// For most migrations (95% of cases) generating SQL cannot fail; use GenerateE for
-// error-returning generation.
+// Generate is the legacy convenience wrapper for a generator that returns only a string.
 func Generate(name string, generator func(context.Context, *sql.Tx) string, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
 	pm.genFn = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, tx), nil }
@@ -168,6 +162,8 @@ func GenerateE(name string, generator func(context.Context, *sql.Tx) (string, er
 	}
 	return m
 }
+
+type ConnPtr interface{ *sql.Tx | *sql.DB }
 
 // Computed defines a migration that runs arbitrary Go code. Supplying a *sql.DB
 // (Computed[*sql.DB]) makes it inherently non-transactional; using *sql.Tx keeps
@@ -413,7 +409,7 @@ func (p *MySQL) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *lib
 	}
 	tx, err := d.DB().BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return errors.Wrap(err, "could not start transaction: %s")
+		return errors.Wrap(err, "Could not start transaction: %s")
 	}
 	p.lockStr = "libschema_" + tableName
 	var gotLock int
@@ -493,7 +489,7 @@ func (p *MySQL) UnlockMigrationsTable(_ *internal.Log) error {
 	}()
 	_, err := p.lockTx.Exec(`SELECT RELEASE_LOCK(?)`, p.lockStr)
 	if err != nil {
-		return errors.Wrap(err, "could not release explicit lock for schema migrations")
+		return errors.Wrap(err, "Could not release explicit lock for schema migrations")
 	}
 	return nil
 }

@@ -84,5 +84,3 @@ func TestTrackingSchemaTableInvalid(t *testing.T) {
 	_, _, err := trackingSchemaTable(d)
 	assert.Error(t, err, "expected error for three-part tracking table name")
 }
-
-// TestServerVersionCaching ensures the SHOW server_version query only executes once.

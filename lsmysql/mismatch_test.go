@@ -13,8 +13,6 @@ import (
 )
 
 // TestGenerateMismatch ensures a Generate[*sql.Tx] + ForceNonTransactional records a creationErr surfaced at execution.
-// Removed TestGenerateMismatch: legacy Generate no longer uses generics; mismatch semantics covered elsewhere.
-
 func TestComputedMismatch(t *testing.T) {
 	t.Parallel()
 	dsn := os.Getenv("LIBSCHEMA_TEST_MYSQL_DSN")

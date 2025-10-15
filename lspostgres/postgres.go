@@ -44,10 +44,9 @@ type pmigration struct {
 	libschema.MigrationBase
 	scriptSQL string
 	// genFn always uses the (string, error) internal form.
-	genFn       func(context.Context, *sql.Tx) (string, error)
-	computedTx  func(context.Context, *sql.Tx) error
-	computedDB  func(context.Context, *sql.DB) error
-	creationErr error
+	genFn      func(context.Context, *sql.Tx) (string, error)
+	computedTx func(context.Context, *sql.Tx) error
+	computedDB func(context.Context, *sql.DB) error
 }
 
 // applySchemaOverridePostgres sets search_path in a transaction if override provided.
@@ -138,9 +137,6 @@ func Computed[T ConnPtr](name string, action func(context.Context, T) error, opt
 // It is expected to be called by libschema.
 func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (result sql.Result, _ error) {
 	pm := m.(*pmigration)
-	if pm.creationErr != nil {
-		return nil, pm.creationErr
-	}
 
 	// Initialize stmtclass version pruning once.
 	if p.serverMajor == 0 {
@@ -434,9 +430,6 @@ func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ *internal.Log, 
 	}
 	if m.genFn != nil || m.computedTx != nil || m.computedDB != nil || m.scriptSQL != "" {
 		return nil
-	}
-	if m.creationErr != nil {
-		return m.creationErr
 	}
 	return errors.Errorf("migration %s is not supported", migration.Base().Name)
 }

@@ -73,11 +73,7 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 
 // Generate creates a libschema.Migration from a function that returns a SQL string
 // Generate is the legacy convenience wrapper for a generator that does not fail.
-func Generate(
-	name string,
-	generator func(context.Context, *sql.Tx) string,
-	opts ...libschema.MigrationOption,
-) libschema.Migration {
+func Generate(name string, generator func(context.Context, *sql.Tx) string, opts ...libschema.MigrationOption) libschema.Migration {
 	return lsmysql.Generate(name, generator, opts...)
 }
 

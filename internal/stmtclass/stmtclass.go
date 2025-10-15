@@ -37,7 +37,6 @@ type StatementFlags struct {
 	Text  string
 }
 
-// Summarized aggregates useful characteristics for higher-level logic.
 // Summary maps each flag to the first statement text that exhibited it.
 // Flags that are synthetic (e.g. IsMultipleStatements) will map to "" unless
 // explicitly derived from a concrete statement.
@@ -126,8 +125,8 @@ func isPostgresMustNonTxVersion(txt string, major int) bool {
 // Helpers for (easily) idempotent CREATE/DROP classification.
 var (
 	mysqlCreateEasy = []string{"create table"}
-	pgCreateEasy    = []string{"create table", "create index", "create schema", "create sequence", "create extension"}
 	mysqlDropEasy   = []string{"drop table", "drop database"}
+	pgCreateEasy    = []string{"create table", "create index", "create schema", "create sequence", "create extension"}
 	pgDropEasy      = []string{"drop table", "drop index", "drop schema", "drop sequence", "drop extension"}
 )
 
