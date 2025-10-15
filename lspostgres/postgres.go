@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -25,48 +24,41 @@ import (
 // * Can do DDL commands inside transactions
 // * Support UPSERT using INSERT ... ON CONFLICT
 type Postgres struct {
-	lockTx *sql.Tx
-	log    *internal.Log
-	// cached server version (major, minor) once queried; zero values mean unknown
+	lockTx      *sql.Tx
+	log         *internal.Log
 	serverMajor int
 	serverMinor int
-	serverOnce  sync.Once // ensures we attempt version detection only once
-	// compiled non-transactional statement patterns (pruned after version detection)
-	nonTxStmtRegex []*regexp.Regexp
-}
-
-// NOTE: Sentinel errors for non-transactional validation now live in root package (libschema).
-
-// nonTxIdempotencyRequirements lists patterns of mandatory non-transactional statements
-// that must include a particular substring to be considered idempotent. This mirrors
-// the regex-driven classification approach used by Script() for determining non-tx
-// execution. If a pattern matches but the required substring is missing, execution
-// is blocked with ErrNonIdempotentNonTx before any SQL is run.
-var nonTxIdempotencyRequirements = []struct {
-	re             *regexp.Regexp
-	requiredSubstr string
-}{
-	{regexp.MustCompile(`(?i)^create\s+(unique\s+)?index\s+concurrently\b`), "if not exists"},
-	{regexp.MustCompile(`(?i)^drop\s+index\s+concurrently\b`), "if exists"},
+	serverOnce  sync.Once
 }
 
 // New creates a libschema.Database with a postgres driver built in.  The dbName
 // parameter is used internally by libschema, but does not affect where migrations
 // are actually applied.
 func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, error) {
-	return schema.NewDatabase(log, dbName, db, &Postgres{log: log, nonTxStmtRegex: append([]*regexp.Regexp{}, baseNonTxStmtRegex...)})
+	return schema.NewDatabase(log, dbName, db, &Postgres{log: log})
 }
 
 type ConnPtr interface{ *sql.Tx | *sql.DB }
 
 type pmigration struct {
 	libschema.MigrationBase
-	scriptTx    func(context.Context, *sql.Tx) (string, error)
-	scriptDB    func(context.Context, *sql.DB) (string, error)
-	scriptSQL   string // raw SQL for deferred classification
+	scriptSQL string
+	// genFn always uses the (string, error) internal form.
+	genFn       func(context.Context, *sql.Tx) (string, error)
 	computedTx  func(context.Context, *sql.Tx) error
 	computedDB  func(context.Context, *sql.DB) error
 	creationErr error
+}
+
+// applySchemaOverridePostgres sets search_path in a transaction if override provided.
+func applySchemaOverridePostgres(ctx context.Context, tx *sql.Tx, override, migName string) error {
+	if override == "" {
+		return nil
+	}
+	if _, err := tx.Exec(`SET search_path TO ` + pq.QuoteIdentifier(override)); err != nil {
+		return errors.Wrapf(err, "set search path to %s for %s", override, migName)
+	}
+	return nil
 }
 
 func (m *pmigration) Copy() libschema.Migration {
@@ -79,61 +71,6 @@ func (m *pmigration) Base() *libschema.MigrationBase {
 	return &m.MigrationBase
 }
 
-// regexByVersion groups regexes that should be dropped at or after the specified
-// major version (dropAtMajor == 0 means keep always). Grouping reduces visual noise.
-type regexByVersion struct {
-	re          []*regexp.Regexp
-	dropAtMajor int
-}
-
-var nonTxGroups = []regexByVersion{
-	{ // always required non-transactional statements
-		re: []*regexp.Regexp{
-			regexp.MustCompile(`(?is)^create\s+(unique\s+)?index\s+concurrently\b`),
-			regexp.MustCompile(`(?is)^drop\s+index\s+concurrently\b`),
-			regexp.MustCompile(`(?is)^refresh\s+materialized\s+view\s+concurrently\b`),
-			regexp.MustCompile(`(?is)^reindex\s+concurrently\b`),
-			regexp.MustCompile(`(?is)^vacuum\s+full\b`),
-			regexp.MustCompile(`(?is)^cluster\b`),
-			regexp.MustCompile(`(?is)^create\s+database\b`),
-			regexp.MustCompile(`(?is)^drop\s+database\b`),
-			regexp.MustCompile(`(?is)^create\s+tablespace\b`),
-			regexp.MustCompile(`(?is)^drop\s+tablespace\b`),
-			regexp.MustCompile(`(?is)^create\s+subscription\b`),
-			regexp.MustCompile(`(?is)^alter\s+subscription\b`),
-			regexp.MustCompile(`(?is)^drop\s+subscription\b`),
-		},
-		dropAtMajor: 0,
-	},
-	{ // becomes safe inside transactions in PG 12+
-		re: []*regexp.Regexp{
-			regexp.MustCompile(`(?is)^alter\s+type\s+[^;]+\s+add\s+value\b`),
-		},
-		dropAtMajor: 12,
-	},
-}
-
-var baseNonTxStmtRegex = func() []*regexp.Regexp { // initial full set
-	var res []*regexp.Regexp
-	for _, g := range nonTxGroups {
-		res = append(res, g.re...)
-	}
-	return res
-}()
-
-// adjustNonTxForVersion is called lazily once we know server version to remove
-// patterns that are not needed for newer versions (e.g., ALTER TYPE ADD VALUE >= 12).
-func (p *Postgres) adjustNonTxForVersion(major int) {
-	filtered := p.nonTxStmtRegex[:0]
-	for _, g := range nonTxGroups {
-		if g.dropAtMajor != 0 && major >= g.dropAtMajor {
-			continue
-		}
-		filtered = append(filtered, g.re...)
-	}
-	p.nonTxStmtRegex = filtered
-}
-
 // Script is a convenience helper for a literal SQL statement migration. It
 // automatically chooses transactional (*sql.Tx) or non-transactional (*sql.DB)
 // execution based on Postgres rules for statements that cannot run inside a
@@ -141,262 +78,177 @@ func (p *Postgres) adjustNonTxForVersion(major int) {
 // The choice of transactional vs non-transactional Can be overridden with
 // ForceNonTransactional() or ForceTransactional() options.
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
-	pm := &pmigration{
-		MigrationBase: libschema.MigrationBase{
-			Name: libschema.MigrationName{
-				Name: name,
-			},
-		},
-		scriptSQL: sqlText,
-	}
+	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, scriptSQL: sqlText}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(m)
 	}
-
 	return m
 }
 
-// Generate defines a migration that returns a SQL string.
-// Transactionality is fixed by the generic type parameter T:
-//   - Generate[*sql.Tx]  => transactional
-//   - Generate[*sql.DB]  => non-transactional
-//
-// The driver does not attempt to coerce or flip this at runtime; choose the type that matches the desired mode.
-func Generate[T ConnPtr](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
-	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
-	var zero T
-	var mustBeNonTransactional bool
-	switch any(zero).(type) {
-	case *sql.Tx:
-		pm.scriptTx = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, any(tx).(T)), nil }
-	case *sql.DB:
-		mustBeNonTransactional = true
-		pm.MigrationBase.SetNonTransactional(true) //nolint:staticcheck // QF1008: keep explicit for clarity and grepability
-		pm.scriptDB = func(ctx context.Context, db *sql.DB) (string, error) { return generator(ctx, any(db).(T)), nil }
-	}
-	lsm := libschema.Migration(pm)
+// Generate defines a migration that produces SQL inside the real migration transaction.
+// It is always transactional. For non-transactional, use Script (auto-downgrade) or Computed[*sql.DB].
+// The generator callback runs in a transaction, but the migration may or may not
+// run in a transaction depending upon what it does and if ForceTransactional or ForceNonTransactional
+// is used.
+// Generate is the legacy form taking a generator that returns only a string.
+// Use GenerateE for error-capable generation.
+func Generate(name string, generator func(context.Context, *sql.Tx) string, opts ...libschema.MigrationOption) libschema.Migration {
+	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, genFn: func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, tx), nil }}
+	m := libschema.Migration(pm)
 	for _, opt := range opts {
-		opt(lsm)
+		opt(m)
 	}
-	// Apply any force override prior to evaluating mismatch so forced direction is reflected in finalTx.
-	pm.ApplyForceOverride()
-	// Verify no conflicting override: expected transactional mode derives from the generic type.
-	expectedTx := !mustBeNonTransactional
-	finalTx := !pm.NonTransactional()
-	if expectedTx != finalTx && pm.creationErr == nil {
-		pm.creationErr = errors.Errorf("Generate[%T] %s transactional override mismatch (expected %s)", zero, name, ternary(expectedTx, "transactional", "non-transactional"))
+	return m
+}
+
+// GenerateE is the error-capable variant of Generate.
+func GenerateE(name string, generator func(context.Context, *sql.Tx) (string, error), opts ...libschema.MigrationOption) libschema.Migration {
+	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, genFn: generator}
+	m := libschema.Migration(pm)
+	for _, opt := range opts {
+		opt(m)
 	}
-	return lsm
+	return m
 }
 
 // Computed defines a migration that runs arbitrary Go code.
 func Computed[T ConnPtr](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
+	// Detect which concrete generic type was requested by instantiating a zero value and
+	// performing type switch on its dynamic type via any(zero).
 	var zero T
 	switch any(zero).(type) {
 	case *sql.Tx:
 		pm.computedTx = func(ctx context.Context, tx *sql.Tx) error { return action(ctx, any(tx).(T)) }
 	case *sql.DB:
-		pm.MigrationBase.SetNonTransactional(true) //nolint:staticcheck // QF1008: intentional explicit embedded field reference
+		pm.MigrationBase.SetNonTransactional(true) //nolint:staticcheck
 		pm.computedDB = func(ctx context.Context, db *sql.DB) error { return action(ctx, any(db).(T)) }
+	default:
+		panic("unsupported generic type in Computed")
 	}
 	lsm := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(lsm)
 	}
-	expectedTx := (func() bool { _, is := any(zero).(*sql.Tx); return is })()
-	finalTx := !pm.NonTransactional()
-	if expectedTx != finalTx && pm.creationErr == nil {
-		pm.creationErr = errors.Errorf("Computed[%T] %s transactional override mismatch (expected %s)", zero, name, ternary(expectedTx, "transactional", "non-transactional"))
-	}
 	return lsm
-}
-
-// ternary is a tiny helper to avoid repeating inline branching in error formatting.
-func ternary[T any](cond bool, a, b T) T {
-	if cond {
-		return a
-	}
-	return b
 }
 
 // DoOneMigration applies a single migration.
 // It is expected to be called by libschema.
-func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (sql.Result, error) {
+func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (result sql.Result, _ error) {
 	pm := m.(*pmigration)
 	if pm.creationErr != nil {
 		return nil, pm.creationErr
 	}
 
-	// Ensure server version adjustments applied once we have a DB.
+	// Initialize stmtclass version pruning once.
 	if p.serverMajor == 0 {
-		if maj, _ := p.ServerVersion(ctx, d.DB()); maj != 0 {
-			p.adjustNonTxForVersion(maj)
+		if maj, min := p.ServerVersion(ctx, d.DB()); maj != 0 {
+			p.serverMajor, p.serverMinor = maj, min
 		}
 	}
 
 	pm.ApplyForceOverride()
 
-	// Deferred non-tx decision: replicate original Script() classification using tokenizer but
-	// perform it here (after server version pruning) so we have accurate regex set.
-	// We only inspect the first command (comments stripped) – multi-statement scripts are
-	// disallowed for non-tx later; if user forces transactional we intentionally skip downgrade.
-	if pm.scriptSQL != "" {
-		if !pm.Base().ForcedTransactional() { // only attempt downgrade if user did not force transactional
-			parts := sqltoken.TokenizePostgreSQL(pm.scriptSQL).Strip().CmdSplit().Strings()
-			if len(parts) > 0 {
-				first := strings.ToLower(strings.TrimSpace(parts[0]))
-				for _, re := range p.nonTxStmtRegex { // version-adjusted subset
-					if re.MatchString(first) {
-						pm.SetNonTransactional(true)
-						pm.scriptDB = func(context.Context, *sql.DB) (string, error) { return pm.scriptSQL, nil }
-						pm.scriptTx = nil
-						break
-					}
-				}
-			}
-		}
-
-		// If downgrade logic above changed transactional mode we already set the appropriate script* closure.
-		// If neither closure set yet (no downgrade, not forced non-tx), assign transactional version now.
-		if pm.scriptTx == nil && pm.scriptDB == nil {
-			if pm.NonTransactional() { // forced non-tx (user override) but not downgraded path
-				pm.scriptDB = func(context.Context, *sql.DB) (string, error) { return pm.scriptSQL, nil }
-			} else {
-				pm.scriptTx = func(context.Context, *sql.Tx) (string, error) { return pm.scriptSQL, nil }
-			}
-		}
-	}
-
-	var res sql.Result
-
 	f := &migfinalize.Finalizer[sql.DB, sql.Tx]{
-		Ctx:              ctx,
-		DB:               d.DB(),
-		RunTransactional: !m.Base().NonTransactional(),
-		Log:              log,
-		BeginTx: func(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
-			tx, err := db.BeginTx(ctx, d.Options.MigrationTxOptions)
+		Ctx: ctx,
+		DB:  d.DB(),
+		Log: log,
+		BeginTx: func(ctx context.Context, db *sql.DB) (tx *sql.Tx, err error) {
+			defer func() {
+				if err != nil && tx != nil {
+					_ = tx.Rollback()
+				}
+			}()
+			tx, err = db.BeginTx(ctx, d.Options.MigrationTxOptions)
 			if err != nil {
 				return nil, errors.Wrapf(err, "begin Tx for migration %s", m.Base().Name)
 			}
-			if d.Options.SchemaOverride != "" { // set search_path early
-				if _, err2 := tx.Exec(`SET search_path TO ` + pq.QuoteIdentifier(d.Options.SchemaOverride)); err2 != nil {
-					_ = tx.Rollback()
-					return nil, errors.Wrapf(err2, "set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
-				}
+			if err := applySchemaOverridePostgres(ctx, tx, d.Options.SchemaOverride, m.Base().Name.Name); err != nil {
+				return nil, err
 			}
+			// TODO: change transaction mode if forced non-transactional
 			return tx, nil
 		},
 		BodyTx: func(ctx context.Context, tx *sql.Tx) error {
-			if pm.scriptTx != nil || pm.scriptDB != nil {
-				if pm.scriptTx == nil { // mismatch
-					return errors.Errorf("migration %s transactional mode mismatch with script function", m.Base().Name)
+			// Handle computed first since it's simple
+			if pm.computedTx != nil {
+				if m.Base().NonTransactional() {
+					return errors.Errorf("cannot execute *sql.Tx computed callback %s when forced non-transactional", m.Base().Name)
 				}
-				sqlText, err := pm.scriptTx(ctx, tx)
+				return errors.Wrapf(pm.computedTx(ctx, tx), "callback %s", m.Base().Name)
+			}
+			if pm.computedDB != nil {
+				if !m.Base().NonTransactional() {
+					return errors.Errorf("cannot execute *sql.DB computed callback %s when forced transactional", m.Base().Name)
+				}
+				return errors.Wrapf(pm.computedDB(ctx, d.DB()), "callback %s", m.Base().Name)
+			}
+			// Script / Generate path
+			scriptSQL := pm.scriptSQL
+			if pm.genFn != nil {
+				sqlText, err := pm.genFn(ctx, tx)
 				if err != nil {
 					return errors.WithStack(err)
 				}
-				trim := strings.TrimSpace(sqlText)
-				if trim == "" {
-					return nil
-				}
-				res, err = tx.ExecContext(ctx, sqlText)
-				if err != nil {
-					return errors.Wrap(err, sqlText)
-				}
+				scriptSQL = sqlText
+			}
+			scriptSQL = strings.TrimSpace(scriptSQL)
+			if scriptSQL == "" {
 				return nil
 			}
-			// Computed path
-			if pm.computedTx != nil || pm.computedDB != nil {
-				if pm.computedTx == nil {
-					return errors.Errorf("migration %s transactional mode mismatch with computed function", m.Base().Name)
+			// Unified classification & downgrade via stmtclass
+			ts := sqltoken.TokenizePostgreSQL(scriptSQL)
+			stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectPostgres, p.serverMajor, ts)
+			if !pm.Base().ForcedTransactional() && !pm.Base().NonTransactional() {
+				mustNonTx := false
+				for _, st := range stmts {
+					if (st.Flags & stmtclass.IsMustNonTx) != 0 {
+						mustNonTx = true
+						break
+					}
 				}
-				return errors.WithStack(pm.computedTx(ctx, tx))
+				if mustNonTx {
+					pm.SetNonTransactional(true)
+				}
 			}
-			return errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
+			if !pm.Base().NonTransactional() {
+				var err error
+				result, err = tx.ExecContext(ctx, scriptSQL)
+				return errors.Wrapf(err, "ran %s in a transaction", scriptSQL)
+			}
+			// Non-transactional validation (final mode is non-tx)
+			// Apply schema override (search_path) for non-transactional execution if needed.
+			if d.Options.SchemaOverride != "" {
+				if _, err := d.DB().ExecContext(ctx, "SET search_path TO "+pq.QuoteIdentifier(d.Options.SchemaOverride)); err != nil {
+					return errors.Wrapf(err, "set search_path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
+				}
+			}
+			if agg&stmtclass.IsMultipleStatements != 0 || len(stmts) != 1 {
+				return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement", m.Base().Name)
+			}
+			st := stmts[0]
+			if st.Flags&stmtclass.IsNonIdempotent != 0 && !m.Base().HasSkipIf() {
+				if st.Flags&stmtclass.IsEasilyIdempotentFix != 0 {
+					return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent statement missing IF [NOT] EXISTS: %s", m.Base().Name, strings.TrimSpace(st.Text))
+				}
+				return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent: %s", m.Base().Name, strings.TrimSpace(st.Text))
+			}
+			var err error
+			result, err = d.DB().ExecContext(ctx, scriptSQL)
+			return errors.Wrap(err, scriptSQL)
 		},
-		BodyNonTx: func(ctx context.Context, db *sql.DB) error {
-			if pm.scriptTx != nil || pm.scriptDB != nil {
-				if pm.scriptDB == nil {
-					return errors.Errorf("migration %s transactional mode mismatch with script function", m.Base().Name)
-				}
-				sqlText, err := pm.scriptDB(ctx, db)
-				if err != nil {
-					return errors.WithStack(err)
-				}
-				trim := strings.TrimSpace(sqlText)
-				if trim == "" {
-					return nil
-				}
-				// If user explicitly forced non-transactional, bypass validation (single-stmt & idempotency heuristics).
-				if !pm.Base().ForcedNonTransactional() { // normal auto-downgraded non-tx path enforces safety checks
-					ts := sqltoken.TokenizePostgreSQL(sqlText)
-					cmds := ts.Strip().CmdSplit()
-					if len(cmds) != 1 {
-						return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement (convert to Computed[*sql.DB] for complex logic)", m.Base().Name)
-					}
-					stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectPostgres, ts)
-					if agg&stmtclass.IsMultipleStatements != 0 || len(stmts) != 1 { // defensive; parser split above should already enforce 1
-						return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement", m.Base().Name)
-					}
-					f := stmts[0].Flags
-					if f&stmtclass.IsNonIdempotent != 0 {
-						if f&stmtclass.IsEasilyIdempotentFix != 0 {
-							// Easy fix (e.g. CREATE TABLE/INDEX/SEQUENCE without IF NOT EXISTS, DROP without IF EXISTS, etc.) -> hard error
-							return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent statement that is easily idempotent (add IF [NOT] EXISTS): %s", m.Base().Name, strings.TrimSpace(stmts[0].Text))
-						}
-						// Harder to make idempotent automatically: allow but warn.
-						p.log.Warn("allowing non-transactional non-idempotent (hard-fix) statement in " + m.Base().Name.String() + ": " + strings.TrimSpace(stmts[0].Text))
-					}
-					// Retain specialized regex requirements (eg CREATE INDEX CONCURRENTLY) until folded fully into classifier.
-					lower := strings.ToLower(sqlText)
-					for _, req := range nonTxIdempotencyRequirements {
-						if req.re.MatchString(lower) && !strings.Contains(lower, req.requiredSubstr) {
-							return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s uses statement matching %q without %s (required for idempotency)", m.Base().Name, req.re.String(), req.requiredSubstr)
-						}
-					}
-				} else if p.log != nil {
-					p.log.Warn("bypassing non-transactional validation due to ForceNonTransactional() on " + m.Base().Name.String())
-				}
-				res, err = db.ExecContext(ctx, sqlText)
-				if err != nil {
-					return errors.Wrap(err, sqlText)
-				}
-				return nil
-			}
-			// Computed path (non-transactional)
-			if pm.computedTx != nil || pm.computedDB != nil {
-				if pm.computedDB == nil {
-					return errors.Errorf("migration %s transactional mode mismatch with computed function", m.Base().Name)
-				}
-				return pm.computedDB(ctx, db)
-			}
-			return errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
-		},
-		SaveStatusInTx: func(ctx context.Context, tx *sql.Tx) error {
-			return errors.WithStack(p.saveStatus(log, tx, d, m, true, nil))
+		SaveStatus: func(ctx context.Context, tx *sql.Tx, migErr error) error {
+			return errors.WithStack(p.saveStatus(log, tx, d, m, migErr == nil, migErr))
 		},
 		CommitTx:   func(tx *sql.Tx) error { return errors.WithStack(tx.Commit()) },
 		RollbackTx: func(tx *sql.Tx) { _ = tx.Rollback() },
-		BeginStatusTx: func(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
-			stx, err := db.BeginTx(ctx, d.Options.MigrationTxOptions)
-			if err != nil {
-				return nil, errors.Wrapf(err, "begin tx to save status for %s", m.Base().Name)
-			}
-			return stx, nil
-		},
-		SaveStatusSeparate: func(ctx context.Context, stx *sql.Tx, migErr error) error {
-			return errors.WithStack(p.saveStatus(log, stx, d, m, migErr == nil, migErr))
-		},
-		CommitStatusTx:   func(stx *sql.Tx) error { return errors.WithStack(stx.Commit()) },
-		RollbackStatusTx: func(stx *sql.Tx) { _ = stx.Rollback() },
-		SetDone:          func() { m.Base().SetStatus(libschema.MigrationStatus{Done: true}) },
-		SetError:         func(err error) { m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()}) },
+		SetDone:    func() { m.Base().SetStatus(libschema.MigrationStatus{Done: true}) },
+		SetError:   func(err error) { m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()}) },
 	}
 
-	return res, errors.WithStack(f.Run())
+	return result, errors.WithStack(f.Run())
 }
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
@@ -580,9 +432,7 @@ func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ *internal.Log, 
 	if !ok {
 		return errors.Errorf("non-postgres migration %s registered with postgres migrations", migration.Base().Name)
 	}
-	fmt.Printf("XXX IsMigrationSupported name=%s scriptSQL.len=%d scriptTx=%v scriptDB=%v computedTx=%v computedDB=%v nonTx=%v forcedTx?=%v forcedNonTx?=%v\n",
-		m.Base().Name.Name, len(m.scriptSQL), m.scriptTx != nil, m.scriptDB != nil, m.computedTx != nil, m.computedDB != nil, m.NonTransactional(), m.ForcedTransactional(), m.ForcedNonTransactional())
-	if m.scriptTx != nil || m.scriptDB != nil || m.computedTx != nil || m.computedDB != nil || m.scriptSQL != "" {
+	if m.genFn != nil || m.computedTx != nil || m.computedDB != nil || m.scriptSQL != "" {
 		return nil
 	}
 	if m.creationErr != nil {

@@ -18,15 +18,10 @@ import (
 	"github.com/muir/libschema/internal/stmtclass"
 )
 
-// retained regexp use for identifier validation
-
 // MySQL is a libschema.Driver for connecting to MySQL-like databases that
 // have the following characteristics:
 // * CANNOT do DDL commands inside transactions
 // * Support UPSERT using INSERT ... ON DUPLICATE KEY UPDATE
-// ConnPtr retained only for Computed generic API (Generate generics removed).
-type ConnPtr interface{ *sql.Tx | *sql.DB }
-
 // * uses /* -- and # for comments
 // * supports advisory locks
 // * has quoting modes (ANSI_QUOTES)
@@ -48,14 +43,36 @@ type ConnPtr interface{ *sql.Tx | *sql.DB }
 // SchemaOverride be set when creating the libschema.Schema object.  That SchemaOverride will
 // be propagated into the MySQL object and be used as a default table for all of the
 // functions to interrogate data defintion status.
-type MySQL struct {
-	lockTx              *sql.Tx
-	lockStr             string
-	db                  *sql.DB
-	databaseName        string
-	lock                sync.Mutex
-	trackingSchemaTable func(*libschema.Database) (string, string, string, error)
-	skipDatabase        bool
+type (
+	ConnPtr interface{ *sql.Tx | *sql.DB }
+	MySQL   struct {
+		lockTx              *sql.Tx
+		lockStr             string
+		db                  *sql.DB
+		databaseName        string
+		lock                sync.Mutex
+		trackingSchemaTable func(*libschema.Database) (string, string, string, error)
+		skipDatabase        bool
+	}
+)
+
+// applySchemaOverrideMySQL sets the database (schema) for the current connection/transaction
+// if override is non-empty. It validates identifier simplicity. Works with either *sql.Tx
+// or *sql.DB (passed as interface) executing USE outside of a transaction when needed.
+func applySchemaOverrideMySQL(ctx context.Context, execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, override, migName string,
+) error { // minimal interface for *sql.Tx and *sql.DB
+	if override == "" {
+		return nil
+	}
+	if !simpleIdentifierRE.MatchString(override) {
+		return errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", override)
+	}
+	if _, err := execer.ExecContext(ctx, `USE `+override); err != nil {
+		return errors.Wrapf(err, "set schema/database to %s for %s", override, migName)
+	}
+	return nil
 }
 
 type MySQLOpt func(*MySQL)
@@ -92,19 +109,11 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB,
 
 type mmigration struct {
 	libschema.MigrationBase
-	scriptTx func(context.Context, *sql.Tx) (string, error)
-	scriptDB func(context.Context, *sql.DB) (string, error)
-	// scriptSQL holds the raw SQL text for literal Script() migrations; classification and
-	// auto-downgrade decisions are deferred to first execution (Option D design).
 	scriptSQL string
-	// genFn holds a deferred generator returning SQL executed with *sql.Tx (transactional by default).
-	genFn       func(context.Context, *sql.Tx) (string, error)
-	computedTx  func(context.Context, *sql.Tx) error
-	computedDB  func(context.Context, *sql.DB) error
-	creationErr error
-	// validatedAtRuntime indicates we have already run the legacy CheckScript() validation
-	// (covers both Script & Generate) to avoid duplicate work if future logic re-enters.
-	validatedAtRuntime bool
+	// genFn always has the newer (string, error) signature internally.
+	genFn      func(context.Context, *sql.Tx) (string, error)
+	computedTx func(context.Context, *sql.Tx) error
+	computedDB func(context.Context, *sql.DB) error
 }
 
 func (m *mmigration) Copy() libschema.Migration {
@@ -112,34 +121,45 @@ func (m *mmigration) Copy() libschema.Migration {
 	n.MigrationBase = m.MigrationBase.Copy()
 	return &n
 }
-
 func (m *mmigration) Base() *libschema.MigrationBase { return &m.MigrationBase }
 
-// Script registers a literal SQL migration. Always transactional by default (uses *sql.Tx)
-// unless overridden with ForceNonTransactional().
+// Script is a convenience helper for a literal SQL statement migration. It
+// automatically chooses transactional (*sql.Tx) or non-transactional (*sql.DB)
+// execution based on MySQL rules: DDL statements auto-commit and therefore
+// must run outside an explicit transaction. Pure DML remains transactional.
+// The choice can be asserted with ForceNonTransactional() or ForceTransactional()
+// (an error is raised if the assertion is impossible).
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
-	// Under Option D we defer all classification (DDL/DML, idempotency, auto-downgrade) and
-	// legacy CheckScript validation to runtime. Here we only record the raw SQL and options.
+	// Classification and validation are deferred to execution; here we only store raw SQL and options.
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, scriptSQL: sqlText}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(m)
 	}
-	// Force overrides will be applied at execution; we intentionally do NOT mutate
-	// transactional mode here so that a later Force call can override prior state before
-	// first execution.
 	return m
 }
 
-// Generate defines a deferred, transactional SQL generator. The function is invoked at
-// execution time with a *sql.Tx (unless forced / downgraded to non-transactional due to
-// required DDL and not ForcedTransactional). If downgraded or forced non-tx, the generator
-// still runs first inside a disposable *sql.Tx? No: for MySQL, downgrade requires executing
-// statements outside a transaction, so we call generator once using a temporary BEGIN/ROLLBACK
-// would be misleading. Simpler contract: generator always receives *sql.Tx; if the migration
-// must run non-transactionally we error if downgrade needed. (Future enhancement could add
-// a dual-mode generator.)
-func Generate(name string, generator func(context.Context, *sql.Tx) (string, error), opts ...libschema.MigrationOption) libschema.Migration {
+// Generate defines a migration that produces SQL inside an initial transaction
+// context (for introspection), then classifies it. If the resulting SQL contains
+// DDL that MySQL must auto-commit the migration is executed non-transactionally
+// unless ForceTransactional() was specified (which causes an error). For
+// unconditional non-transactional work prefer Script (with prewritten SQL) or a
+// Computed[*sql.DB] migration.
+// Generate is the legacy form that accepts a generator which returns only a string.
+// For most migrations (95% of cases) generating SQL cannot fail; use GenerateE for
+// error-returning generation.
+func Generate(name string, generator func(context.Context, *sql.Tx) string, opts ...libschema.MigrationOption) libschema.Migration {
+	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
+	pm.genFn = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, tx), nil }
+	m := libschema.Migration(pm)
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// GenerateE is the error-capable variant of Generate.
+func GenerateE(name string, generator func(context.Context, *sql.Tx) (string, error), opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
 	pm.genFn = generator
 	m := libschema.Migration(pm)
@@ -149,7 +169,9 @@ func Generate(name string, generator func(context.Context, *sql.Tx) (string, err
 	return m
 }
 
-// Computed defines a migration that runs arbitrary Go code.
+// Computed defines a migration that runs arbitrary Go code. Supplying a *sql.DB
+// (Computed[*sql.DB]) makes it inherently non-transactional; using *sql.Tx keeps
+// it transactional.
 func Computed[T ConnPtr](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
 	var zero T
@@ -164,22 +186,7 @@ func Computed[T ConnPtr](name string, action func(context.Context, T) error, opt
 	for _, opt := range opts {
 		opt(m)
 	}
-	// Apply force override (mirrors Generate). Force does not flip generic intent; mismatch becomes creationErr.
-	pm.ApplyForceOverride()
-	expectedTx := (func() bool { _, is := any(zero).(*sql.Tx); return is })()
-	finalTx := !pm.NonTransactional()
-	if expectedTx != finalTx && pm.creationErr == nil {
-		pm.creationErr = errors.Errorf("Computed[%T] %s transactional override mismatch (expected %s)", zero, name, ternary(expectedTx, "transactional", "non-transactional"))
-	}
 	return m
-}
-
-// ternary small helper for concise error formatting parity with Postgres driver.
-func ternary[T any](cond bool, a, b T) T {
-	if cond {
-		return a
-	}
-	return b
 }
 
 // DoOneMigration applies a single migration.
@@ -188,245 +195,98 @@ func ternary[T any](cond bool, a, b T) T {
 // in types that embed MySQL.
 func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (sql.Result, error) {
 	pm := m.(*mmigration)
-	if pm.creationErr != nil {
-		return nil, pm.creationErr
-	}
-	if log != nil && d.Options.DebugLogging {
-		log.Debug("migration start", map[string]interface{}{"migration": m.Base().Name, "nonTx": m.Base().NonTransactional(), "hasScriptTx": pm.scriptTx != nil, "deferred": pm.scriptSQL != "" && pm.scriptTx == nil && pm.scriptDB == nil})
-	}
-	var res sql.Result
-
-	// Apply force override first so classification can honor forced transactional assertion.
 	pm.ApplyForceOverride()
-
-	// helper encapsulating shared classification logic for both literal Script() and generated SQL
-	classify := func(isGenerated bool) error {
-		// Only classify if closures not yet established and we have raw SQL
-		if pm.scriptSQL == "" || (pm.scriptTx != nil || pm.scriptDB != nil) {
-			return nil
-		}
-		sqlText := pm.scriptSQL
-		trim := strings.TrimSpace(sqlText)
-		if trim == "" { // empty script => transactional no-op
-			pm.scriptTx = func(context.Context, *sql.Tx) (string, error) { return sqlText, nil }
-			return nil
-		}
-		stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, sqltoken.TokenizeMySQL(sqlText))
-		if !isGenerated { // literal Script path: auto-downgrade for pure DDL if not forced transactional
-			if !pm.Base().ForcedTransactional() && !pm.NonTransactional() && agg&stmtclass.IsDDL != 0 {
-				if agg&stmtclass.IsDML != 0 {
-					return errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
-				}
-				pm.SetNonTransactional(true)
-				// Non-idempotent easily-fix DDL check (legacy behavior)
-				for _, s := range stmts {
-					if s.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) && !pm.Base().HasSkipIf() {
-						return errors.Errorf("non-idempotent DDL '%s': %w", s.Text, libschema.ErrNonIdempotentDDL)
-					}
-				}
-			}
-		} else { // generated path: DDL not allowed unless user forced transactional (we can't downgrade safely)
-			if agg&stmtclass.IsDDL != 0 {
-				if agg&stmtclass.IsDML != 0 {
-					return errors.Errorf("generated migration %s mixed DDL and DML: %v", m.Base().Name, libschema.ErrDataAndDDL)
-				}
-				if !pm.Base().ForcedTransactional() {
-					return errors.Errorf("generated migration %s contains DDL requiring non-transactional execution; use Script instead", m.Base().Name)
-				}
-				for _, s := range stmts { // idempotent check for generated (same rule set)
-					if s.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) && !pm.Base().HasSkipIf() {
-						return errors.Errorf("generated migration %s non-idempotent DDL '%s': %v", m.Base().Name, s.Text, libschema.ErrNonIdempotentDDL)
-					}
-				}
-				if log != nil {
-					log.Warn("Generate produced DDL inside forced transactional migration: " + m.Base().Name.String())
-				}
-			}
-		}
-		// Assign closures based on final transactional decision
-		if pm.NonTransactional() {
-			pm.scriptDB = func(context.Context, *sql.DB) (string, error) { return sqlText, nil }
-		} else {
-			pm.scriptTx = func(context.Context, *sql.Tx) (string, error) { return sqlText, nil }
-		}
-		return nil
-	}
-
-	// Any remaining creationErr would have surfaced above; now proceed with execution.
-
-	// Perform classification for literal Script migrations (non-generated) before building finalizer
-	if pm.genFn == nil {
-		if err := classify(false); err != nil {
-			pm.creationErr = err
-			return nil, err
-		}
-	}
-
+	var result sql.Result
+	rawDB := d.DB()
 	f := &migfinalize.Finalizer[sql.DB, sql.Tx]{
-		Ctx:              ctx,
-		DB:               d.DB(),
-		RunTransactional: !m.Base().NonTransactional(),
-		Log:              log,
+		Ctx: ctx,
+		DB:  rawDB,
+		Log: log,
 		BeginTx: func(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
-			if db == nil {
-				panic("XXX2")
-			}
 			tx, err := db.BeginTx(ctx, d.Options.MigrationTxOptions)
 			if err != nil {
 				return nil, errors.Wrapf(err, "begin Tx for migration %s", m.Base().Name)
 			}
-			if d.Options.SchemaOverride != "" {
-				if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
-					_ = tx.Rollback()
-					return nil, errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
-				}
-				if _, err2 := tx.Exec(`USE ` + d.Options.SchemaOverride); err2 != nil {
-					_ = tx.Rollback()
-					return nil, errors.Wrapf(err2, "set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
-				}
+			if err := applySchemaOverrideMySQL(ctx, tx, d.Options.SchemaOverride, m.Base().Name.Name); err != nil {
+				return nil, err
 			}
 			return tx, nil
 		},
 		BodyTx: func(ctx context.Context, tx *sql.Tx) error {
-			// Generate migrations: produce SQL now (inside real migration tx) then classify as generated
-			if pm.genFn != nil && pm.scriptSQL == "" {
-				sqlText, gerr := pm.genFn(ctx, tx)
+			// Computed callbacks
+			if pm.computedTx != nil {
+				if m.Base().NonTransactional() {
+					return errors.Errorf("cannot force non-transactional for *sql.Tx computed migration %s", m.Base().Name)
+				}
+				return errors.WithStack(pm.computedTx(ctx, tx))
+			}
+			if pm.computedDB != nil {
+				if !m.Base().NonTransactional() {
+					return errors.Errorf("computed *sql.DB migration %s must be non-transactional", m.Base().Name)
+				}
+				if err := applySchemaOverrideMySQL(ctx, rawDB, d.Options.SchemaOverride, m.Base().Name.Name); err != nil {
+					return err
+				}
+				return errors.WithStack(pm.computedDB(ctx, rawDB))
+			}
+			// Script or Generate path
+			sqlText := pm.scriptSQL
+			if pm.genFn != nil {
+				genSQL, gerr := pm.genFn(ctx, tx)
 				if gerr != nil {
 					return errors.WithStack(gerr)
 				}
-				pm.scriptSQL = sqlText
-				if err := classify(true); err != nil {
-					return err
+				sqlText = genSQL
+			}
+			sqlText = strings.TrimSpace(sqlText)
+			if sqlText == "" {
+				return nil
+			}
+			toks := sqltoken.TokenizeMySQL(sqlText)
+			stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, 0, toks)
+			if agg&stmtclass.IsDDL != 0 {
+				if agg&stmtclass.IsDML != 0 {
+					return errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
+				}
+				if m.Base().ForcedTransactional() {
+					return errors.Errorf("cannot force transactional on MySQL migration %s containing DDL", m.Base().Name)
+				}
+				if !m.Base().NonTransactional() {
+					pm.SetNonTransactional(true)
+				}
+				for _, st := range stmts {
+					if st.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) && !m.Base().HasSkipIf() {
+						return errors.Errorf("non-idempotent DDL '%s': %w", st.Text, libschema.ErrNonIdempotentDDL)
+					}
 				}
 			}
-			if pm.scriptTx != nil || pm.scriptDB != nil {
-				if pm.scriptTx == nil {
-					return errors.Errorf("migration %s transactional mode mismatch", m.Base().Name)
-				}
-				sqlText, err := pm.scriptTx(ctx, tx)
-				if err != nil {
-					return errors.WithStack(err)
-				}
-				if strings.TrimSpace(sqlText) == "" {
-					return nil
-				}
-				// Legacy validation: run CheckScript for both Script & Generate paths (transactional variant)
-				if !pm.validatedAtRuntime {
-					vErr := CheckScript(sqlText)
-					if vErr != nil {
-						if errors.Is(vErr, libschema.ErrNonIdempotentDDL) && m.Base().HasSkipIf() {
-							// Suppress error allowing SkipIf predicate to gate application
-							vErr = nil
-						}
-						if vErr != nil {
-							return errors.WithStack(vErr)
-						}
-					}
-					pm.validatedAtRuntime = true
-				}
+			if !m.Base().NonTransactional() {
 				execRes, execErr := tx.ExecContext(ctx, sqlText)
 				if execErr != nil {
 					return errors.Wrap(execErr, sqlText)
 				}
-				res = execRes
+				result = execRes
 				return nil
 			}
-			if pm.computedTx != nil || pm.computedDB != nil {
-				if pm.computedTx == nil {
-					return errors.Errorf("computed migration %s transactional mode mismatch", m.Base().Name)
-				}
-				return errors.WithStack(pm.computedTx(ctx, tx))
+			if err := applySchemaOverrideMySQL(ctx, rawDB, d.Options.SchemaOverride, m.Base().Name.Name); err != nil {
+				return err
 			}
-			return errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
+			execRes, execErr := rawDB.ExecContext(ctx, sqlText)
+			if execErr != nil {
+				return errors.Wrap(execErr, sqlText)
+			}
+			result = execRes
+			return nil
 		},
-		BodyNonTx: func(ctx context.Context, db *sql.DB) error {
-			if pm.scriptTx != nil || pm.scriptDB != nil {
-				if pm.scriptDB == nil {
-					return errors.Errorf("migration %s transactional mode mismatch", m.Base().Name)
-				}
-				// Ensure schema override is applied for non-transactional execution paths (including downgraded ones).
-				if d.Options.SchemaOverride != "" {
-					if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
-						return errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
-					}
-					if _, err := db.ExecContext(ctx, `USE `+d.Options.SchemaOverride); err != nil {
-						return errors.Wrapf(err, "set schema/database to %s for %s", d.Options.SchemaOverride, m.Base().Name)
-					}
-				}
-				sqlText, err := pm.scriptDB(ctx, db)
-				if err != nil {
-					return errors.WithStack(err)
-				}
-				if strings.TrimSpace(sqlText) == "" {
-					return nil
-				}
-				// Legacy validation for non-transactional scripts (auto-downgraded or explicitly non-tx)
-				if !pm.validatedAtRuntime {
-					vErr := CheckScript(sqlText)
-					if vErr != nil {
-						if errors.Is(vErr, libschema.ErrNonIdempotentDDL) && m.Base().HasSkipIf() {
-							vErr = nil
-						}
-						if vErr != nil {
-							return errors.WithStack(vErr)
-						}
-					}
-					pm.validatedAtRuntime = true
-				}
-				execRes, execErr := db.ExecContext(ctx, sqlText)
-				if execErr != nil {
-					return errors.Wrap(execErr, sqlText)
-				}
-				res = execRes
-				return nil
-			}
-			if pm.computedTx != nil || pm.computedDB != nil {
-				if pm.computedDB == nil {
-					return errors.Errorf("computed migration %s transactional mode mismatch", m.Base().Name)
-				}
-				return errors.WithStack(pm.computedDB(ctx, db))
-			}
-			return errors.Errorf("migration %s has neither script nor computed body", m.Base().Name)
-		},
-		SaveStatusInTx: func(ctx context.Context, tx *sql.Tx) error {
-			if log != nil && d.Options.DebugLogging {
-				log.Debug("save status (in-tx)", map[string]interface{}{"migration": m.Base().Name})
-			}
-			return errors.WithStack(p.saveStatus(log, tx, d, m, true, nil))
+		SaveStatus: func(ctx context.Context, tx *sql.Tx, migErr error) error {
+			return errors.WithStack(p.saveStatus(log, tx, d, m, migErr == nil, migErr))
 		},
 		CommitTx:   func(tx *sql.Tx) error { return errors.WithStack(tx.Commit()) },
 		RollbackTx: func(tx *sql.Tx) { _ = tx.Rollback() },
-		BeginStatusTx: func(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
-			if db == nil {
-				panic("XXX3")
-			}
-			if ctx == nil {
-				panic("XXX4")
-			}
-			stx, err := db.BeginTx(ctx, d.Options.MigrationTxOptions)
-			if err != nil {
-				return nil, errors.Wrapf(err, "begin status tx for %s", m.Base().Name)
-			}
-			return stx, nil
-		},
-		SaveStatusSeparate: func(ctx context.Context, stx *sql.Tx, migErr error) error {
-			if log != nil && d.Options.DebugLogging {
-				log.Debug("save status (separate)", map[string]interface{}{"migration": m.Base().Name, "migErr": func() string {
-					if migErr != nil {
-						return migErr.Error()
-					}
-					return ""
-				}()})
-			}
-			return errors.WithStack(p.saveStatus(log, stx, d, m, migErr == nil, migErr))
-		},
-		CommitStatusTx:   func(stx *sql.Tx) error { return errors.WithStack(stx.Commit()) },
-		RollbackStatusTx: func(stx *sql.Tx) { _ = stx.Rollback() },
-		SetDone:          func() { m.Base().SetStatus(libschema.MigrationStatus{Done: true}) },
-		SetError:         func(err error) { m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()}) },
+		SetDone:    func() { m.Base().SetStatus(libschema.MigrationStatus{Done: true}) },
+		SetError:   func(err error) { m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()}) },
 	}
-
-	return res, errors.WithStack(f.Run())
+	return result, errors.WithStack(f.Run())
 }
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
@@ -553,7 +413,7 @@ func (p *MySQL) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *lib
 	}
 	tx, err := d.DB().BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return errors.Wrap(err, "Could not start transaction: %s")
+		return errors.Wrap(err, "could not start transaction: %s")
 	}
 	p.lockStr = "libschema_" + tableName
 	var gotLock int
@@ -633,7 +493,7 @@ func (p *MySQL) UnlockMigrationsTable(_ *internal.Log) error {
 	}()
 	_, err := p.lockTx.Exec(`SELECT RELEASE_LOCK(?)`, p.lockStr)
 	if err != nil {
-		return errors.Wrap(err, "Could not release explicit lock for schema migrations")
+		return errors.Wrap(err, "could not release explicit lock for schema migrations")
 	}
 	return nil
 }

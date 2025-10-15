@@ -2,14 +2,14 @@
 
 Every migration in libschema must fall into one of two safety models:
 
-1. Transactional (atomic) – it runs inside a `BEGIN/COMMIT` so it either fully
+1. Transactional (atomic) - it runs inside a `BEGIN/COMMIT` so it either fully
     succeeds or is rolled back. Partial progress is never visible.
-2. Idempotent (non-transactional) – it must be safe to retry because PostgreSQL
+2. Idempotent (non-transactional) - it must be safe to retry because PostgreSQL
     requires it to run outside an explicit transaction block. Partial progress
     can be visible; therefore the statement (or code) must tolerate being run
     again after a crash.
 
-When you choose (or libschema auto‑detects) the non‑transactional path you are
+When you choose (or libschema auto-detects) the non-transactional path you are
 implicitly asserting: "this migration is idempotent and retry-safe." The
 library enforces part of that assertion (single statement scripts; some
 idempotency heuristics) and leaves the rest to your careful design.
@@ -43,7 +43,7 @@ lspostgres.Generate[*sql.Tx]("alter-type", func(ctx context.Context, tx *sql.Tx)
 ## Why Some Statements Must Be Non-Transactional (and thus Idempotent)
 
 PostgreSQL rejects certain DDL when executed inside an explicit transaction block
-(`BEGIN … COMMIT`) with an error similar to:
+(`BEGIN ... COMMIT`) with an error similar to:
 
 > cannot run CREATE INDEX CONCURRENTLY inside a transaction block
 
@@ -73,7 +73,7 @@ lspostgres.Computed[*sql.DB]("refresh-mv", func(ctx context.Context, db *sql.DB)
 ```
 
 If the generic parameter type implements `Commit()` and `Rollback()` (like `*sql.Tx`),
-the migration is considered transactional. Otherwise it is automatically marked non‑transactional.
+the migration is considered transactional. Otherwise it is automatically marked non-transactional.
 
 ## Idempotency Requirement (Enforced When Non-Transactional)
 

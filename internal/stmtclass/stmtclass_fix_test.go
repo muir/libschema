@@ -22,7 +22,7 @@ func TestEasilyIdempotentFixFlag(t *testing.T) {
 	}
 	for _, c := range cases {
 		toks := sqltoken.TokenizeMySQL(c.sql)
-		stmts, _ := ClassifyScript(toks)
+		stmts, _ := ClassifyTokens(DialectMySQL, 0, toks)
 		require.Len(t, stmts, 1, c.name)
 		got := stmts[0].Flags
 		assert.Equalf(t, c.wantEasy, got&IsEasilyIdempotentFix != 0, "%s: easy-fix flag mismatch", c.name)

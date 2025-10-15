@@ -210,23 +210,23 @@ func Asynchronous() MigrationOption {
 	}
 }
 
-// RepeatUntilNoOp marks a migration (Script or Generate) to be re‑executed until
+// RepeatUntilNoOp marks a migration (Script or Generate) to be re-executed until
 // the underlying driver reports zero rows affected. Use it for single, pure DML
 // statements that progressively transform data (e.g. UPDATE batches that move a
 // limited subset each run). It is NOT a generic looping primitive.
 //
 // Safety / correctness guidelines:
-//   - Single statement only – multi‑statement scripts can give a meaningless final RowsAffected().
-//   - DML only – avoid DDL (CREATE/ALTER/DROP/REFRESH) or utility commands; most return 0 and will
+//   - Single statement only - multi-statement scripts can give a meaningless final RowsAffected().
+//   - DML only - avoid DDL (CREATE/ALTER/DROP/REFRESH) or utility commands; most return 0 and will
 //     terminate immediately or loop uselessly.
-//   - Idempotent per batch – repeating the same statement after partial success must not corrupt data.
-//   - Do NOT mix with non‑transactional Postgres DDL (concurrent index builds, REFRESH MATERIALIZED VIEW CONCURRENTLY).
+//   - Idempotent per batch - repeating the same statement after partial success must not corrupt data.
+//   - Do NOT mix with non-transactional Postgres DDL (concurrent index builds, REFRESH MATERIALIZED VIEW CONCURRENTLY).
 //   - If logic needs conditionals or multiple statements, write a Computed migration and loop explicitly.
 //
 // Prefer a Computed migration when:
 //   - You need to run multiple statements per batch
 //   - You must inspect progress with custom queries
-//   - RowsAffected() is unreliable or driver‑dependent
+//   - RowsAffected() is unreliable or driver-dependent
 //
 // Future note: libschema may emit debug warnings for obviously unreliable usages
 // (e.g. DDL + RepeatUntilNoOp). Treat the above bullets as normative behavior now.

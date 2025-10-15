@@ -191,32 +191,6 @@ func TestPostgresMigrations(t *testing.T) {
 	}, actions)
 }
 
-// TestGenerateDBInference ensures Generate[*sql.DB] is inferred non-transactional and executes.
-func TestGenerateDBInference(t *testing.T) {
-	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
-	if dsn == "" {
-		t.Skip("Set $LIBSCHEMA_POSTGRES_TEST_DSN to test libschema/lspostgres")
-	}
-	db, err := sql.Open("postgres", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-
-	ctx := context.Background()
-	s := libschema.New(ctx, libschema.Options{})
-	log := libschema.LogFromLog(t)
-	dbase, err := lspostgres.New(log, "test_gen_db", s, db)
-	require.NoError(t, err)
-
-	// Table setup transactional migration for context
-	lib := fmt.Sprintf("%s_%d", t.Name(), time.Now().UnixNano())
-	setup := lspostgres.Script("SETUP_"+lib, "CREATE TABLE IF NOT EXISTS gen_db_inf (id int)")
-	// Non-transactional generation (uses *sql.DB) inserts a row
-	gen := lspostgres.Generate[*sql.DB]("GEN_DB_"+lib, func(_ context.Context, _ *sql.DB) string { return "INSERT INTO gen_db_inf (id) VALUES (1)" })
-	dbase.Migrations(lib, setup, gen)
-	require.NoError(t, s.Migrate(ctx))
-	assert.True(t, gen.Base().NonTransactional(), "Generate[*sql.DB] should be non-transactional")
-}
-
 // TestComputedDBInference ensures Computed[*sql.DB] is inferred non-transactional and runs logic.
 func TestComputedDBInference(t *testing.T) {
 	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")

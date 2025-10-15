@@ -11,16 +11,14 @@ var (
 	ErrNonIdempotentDDL = libschema.ErrNonIdempotentDDL // Deprecated: use libschema.ErrNonIdempotentDDL
 )
 
-// CheckScript attempts to validate that an SQL command does not do
-// both schema changes (DDL) and data changes.  The returned error
-// will be (when checked with errors.Is()) nil, ErrDataAndDDL, or
-// ErrNonIdempotentDDL.
+// CheckScript is deprecated. It performed mixed DDL/DML and non-idempotent DDL detection
+// for MySQL statements. Drivers now perform this logic inline using stmtclass.
+// Deprecated: prefer directly using stmtclass.ClassifyTokens and driver-specific validation.
 func CheckScript(s string) error {
 	ts := sqltoken.TokenizeMySQL(s)
-	stmts, agg := stmtclass.ClassifyScript(ts)
-	sum := stmtclass.SummarizeStatements(stmts, agg)
-	if sum.HasDDL && sum.HasDML {
-		// discover first DDL & DML for message reconstruction
+	stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, 0, ts)
+	sum := stmtclass.Summarize(stmts, agg)
+	if _, hasDDL := sum[stmtclass.IsDDL]; hasDDL && (agg&stmtclass.IsDML) != 0 {
 		var firstDDL, firstDML string
 		for _, st := range stmts {
 			if firstDDL == "" && st.Flags&stmtclass.IsDDL != 0 {
@@ -35,8 +33,8 @@ func CheckScript(s string) error {
 		}
 		return libschema.ErrDataAndDDL.Errorf("data command '%s' combined with DDL command '%s'", firstDML, firstDDL)
 	}
-	if sum.FirstNonIdempotentDDL != "" && agg&stmtclass.IsNonIdempotent != 0 {
-		return libschema.ErrNonIdempotentDDL.Errorf("non-idempotent DDL '%s'", sum.FirstNonIdempotentDDL)
+	if first, hasNonIdem := sum[stmtclass.IsNonIdempotent]; hasNonIdem && (agg&stmtclass.IsDDL) != 0 {
+		return libschema.ErrNonIdempotentDDL.Errorf("non-idempotent DDL '%s'", first)
 	}
 	return nil
 }

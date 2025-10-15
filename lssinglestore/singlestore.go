@@ -71,11 +71,32 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 	return lsmysql.Script(name, sqlText, opts...)
 }
 
-func Generate[T lsmysql.ConnPtr](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
-	return lsmysql.Generate[T](name, generator, opts...)
+// Generate creates a libschema.Migration from a function that returns a SQL string
+// Generate is the legacy convenience wrapper for a generator that does not fail.
+func Generate(
+	name string,
+	generator func(context.Context, *sql.Tx) string,
+	opts ...libschema.MigrationOption,
+) libschema.Migration {
+	return lsmysql.Generate(name, generator, opts...)
 }
 
-func Computed[T lsmysql.ConnPtr](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
+// GenerateE allows a generator that can return an error.
+func GenerateE(
+	name string,
+	generator func(context.Context, *sql.Tx) (string, error),
+	opts ...libschema.MigrationOption,
+) libschema.Migration {
+	return lsmysql.GenerateE(name, generator, opts...)
+}
+
+// Computed creates a libschema.Migration from a Go function to run
+// the migration directly.
+func Computed[T lsmysql.ConnPtr](
+	name string,
+	action func(context.Context, T) error,
+	opts ...libschema.MigrationOption,
+) libschema.Migration {
 	return lsmysql.Computed[T](name, action, opts...)
 }
 
@@ -100,7 +121,7 @@ func (p *SingleStore) LockMigrationsTable(ctx context.Context, _ *internal.Log, 
 			PRIMARY KEY	(anything)
 		)`, tableName))
 	if err != nil {
-		return errors.Wrapf(err, "Could not create libschema migrations table '%s'", tableName)
+		return errors.Wrapf(err, "could not create libschema migrations table '%s'", tableName)
 	}
 	tx, err := d.DB().BeginTx(ctx, nil)
 	if err != nil {
@@ -183,7 +204,7 @@ func (p *SingleStore) CreateSchemaTableIfNotExists(ctx context.Context, _ *inter
 				CREATE DATABASE IF NOT EXISTS %s PARTITIONS 2
 				`, schema))
 		if err != nil {
-			return errors.Wrapf(err, "Could not create libschema schema '%s'", schema)
+			return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
 		}
 	}
 	_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
@@ -199,7 +220,7 @@ func (p *SingleStore) CreateSchemaTableIfNotExists(ctx context.Context, _ *inter
 			PRIMARY KEY	(db_name, library, migration)
 		)`, tableName))
 	if err != nil {
-		return errors.Wrapf(err, "Could not create libschema migrations table '%s'", tableName)
+		return errors.Wrapf(err, "could not create libschema migrations table '%s'", tableName)
 	}
 	return nil
 }

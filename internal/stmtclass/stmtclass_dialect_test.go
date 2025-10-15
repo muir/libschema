@@ -14,7 +14,7 @@ func TestDialectClassification(t *testing.T) {
 		name    string
 		dialect Dialect
 		sql     string
-		want    uint32
+		want    Flag
 	}
 	cases := []tc{
 		{"pg create index unguarded", DialectPostgres, "CREATE INDEX idx ON t(col)", IsDDL | IsNonIdempotent | IsEasilyIdempotentFix},
@@ -34,8 +34,18 @@ func TestDialectClassification(t *testing.T) {
 		{"multi union", DialectMySQL, "CREATE TABLE t (id int); DROP TABLE t", IsDDL | IsNonIdempotent | IsEasilyIdempotentFix | IsMultipleStatements},
 	}
 	for _, c := range cases {
-		toks := sqltoken.TokenizeMySQL(c.sql) // tokenizer choice acceptable for these basic forms
-		stmts, agg := ClassifyTokens(c.dialect, toks)
+		var toks []sqltoken.Token
+		switch c.dialect {
+		case DialectPostgres:
+			// use postgres tokenizer for postgres cases
+			// (a mixed tokenizer would not change flags for statements used here)
+			toks = sqltoken.TokenizePostgreSQL(c.sql)
+		case DialectMySQL:
+			toks = sqltoken.TokenizeMySQL(c.sql)
+		default:
+			toks = sqltoken.TokenizeMySQL(c.sql)
+		}
+		stmts, agg := ClassifyTokens(c.dialect, 0, toks)
 		require.NotEmpty(t, stmts, "%s: no statements classified", c.name)
 		assert.Equalf(t, c.want, agg, "%s: flags mismatch", c.name)
 	}
@@ -49,7 +59,7 @@ func TestGuardInStringLiteral(t *testing.T) {
 	// this test documents existing behavior rather than enforcing stricter token-boundary semantics.
 	sql := "CREATE TABLE t (c varchar(20) DEFAULT 'IF NOT EXISTS');"
 	toks := sqltoken.TokenizeMySQL(sql)
-	_, agg := ClassifyTokens(DialectMySQL, toks)
+	_, agg := ClassifyTokens(DialectMySQL, 0, toks)
 	// Because regex matches inside literals, current behavior will incorrectly drop NonIdempotent flag.
 	// We assert current (permissive) behavior to lock it; consider tightening in future.
 	require.Zero(t, agg&IsNonIdempotent, "expected idempotent classification due to naive regex, got non-idempotent flags=0x%x", agg)
