@@ -8,6 +8,7 @@ import (
 
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lspostgres"
+	"github.com/muir/libschema/lstesting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,17 +27,19 @@ func openPGNonTx(t *testing.T) *sql.DB {
 // TestNonTxSchemaOverride ensures search_path applied for non-transactional execution.
 func TestNonTxSchemaOverride(t *testing.T) {
 	db := openPGNonTx(t)
-	s := libschema.New(context.Background(), libschema.Options{SchemaOverride: "public"})
+	ops, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	defer cleanup(db)
+	_, err := db.Exec("CREATE SCHEMA " + ops.SchemaOverride)
+	require.NoError(t, err)
+	s := libschema.New(context.Background(), ops)
 	log := libschema.LogFromLog(t)
 	dbase, err := lspostgres.New(log, "ntx_schema", s, db)
 	require.NoError(t, err)
-	// MustNonTx: CREATE INDEX CONCURRENTLY
 	table := lspostgres.Script("TAB", "CREATE TABLE IF NOT EXISTS ntx_tab (id int)")
 	idx := lspostgres.Script("IDX", "CREATE INDEX CONCURRENTLY IF NOT EXISTS ntx_idx ON ntx_tab (id)")
 	dbase.Migrations("NTX_LIB", table, idx)
 	require.NoError(t, s.Migrate(context.Background()))
-	// Validate index exists
-	row := db.QueryRow(`SELECT 1 FROM pg_indexes WHERE indexname = 'ntx_idx' AND schemaname = $1`, "public")
+	row := db.QueryRow(`SELECT 1 FROM pg_indexes WHERE indexname = 'ntx_idx' AND schemaname = $1`, ops.SchemaOverride)
 	var one int
 	require.NoError(t, row.Scan(&one))
 }
@@ -44,12 +47,15 @@ func TestNonTxSchemaOverride(t *testing.T) {
 // TestNonTxMultiStatementError verifies multi-statement script downgraded to non-tx errors.
 func TestNonTxMultiStatementError(t *testing.T) {
 	db := openPGNonTx(t)
-	s := libschema.New(context.Background(), libschema.Options{})
+	ops, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	defer cleanup(db)
+	_, err := db.Exec("CREATE SCHEMA " + ops.SchemaOverride)
+	require.NoError(t, err)
+	s := libschema.New(context.Background(), ops)
 	log := libschema.LogFromLog(t)
 	dbase, err := lspostgres.New(log, "ntx_multi", s, db)
 	require.NoError(t, err)
 	tab := lspostgres.Script("T", "CREATE TABLE IF NOT EXISTS mtab (id int)")
-	// Two concurrent index statements -> must non-tx but multi causes error
 	bad := lspostgres.Script("BAD", "CREATE INDEX CONCURRENTLY IF NOT EXISTS m1 ON mtab(id); CREATE INDEX CONCURRENTLY IF NOT EXISTS m2 ON mtab(id)")
 	dbase.Migrations("NTX_MULTI", tab, bad)
 	err = s.Migrate(context.Background())
@@ -60,12 +66,15 @@ func TestNonTxMultiStatementError(t *testing.T) {
 // TestNonTxNonIdempotentEasyFixError missing IF EXISTS on easy-fix ddl
 func TestNonTxNonIdempotentEasyFixError(t *testing.T) {
 	db := openPGNonTx(t)
-	s := libschema.New(context.Background(), libschema.Options{})
+	ops, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	defer cleanup(db)
+	_, err := db.Exec("CREATE SCHEMA " + ops.SchemaOverride)
+	require.NoError(t, err)
+	s := libschema.New(context.Background(), ops)
 	log := libschema.LogFromLog(t)
 	dbase, err := lspostgres.New(log, "ntx_easy", s, db)
 	require.NoError(t, err)
 	tab := lspostgres.Script("T", "CREATE TABLE IF NOT EXISTS etab (id int)")
-	// Non-idempotent easy-fix (CREATE INDEX CONCURRENTLY without IF NOT EXISTS)
 	bad := lspostgres.Script("BAD", "CREATE INDEX CONCURRENTLY eidx ON etab(id)")
 	dbase.Migrations("NTX_EASY", tab, bad)
 	err = s.Migrate(context.Background())
@@ -78,17 +87,19 @@ func TestNonTxNonIdempotentEasyFixError(t *testing.T) {
 // TestNonTxSuccessIdempotent verifies a successful non-transactional idempotent migration.
 func TestNonTxSuccessIdempotent(t *testing.T) {
 	db := openPGNonTx(t)
-	s := libschema.New(context.Background(), libschema.Options{})
+	ops, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	defer cleanup(db)
+	_, err := db.Exec("CREATE SCHEMA " + ops.SchemaOverride)
+	require.NoError(t, err)
+	s := libschema.New(context.Background(), ops)
 	log := libschema.LogFromLog(t)
 	dbase, err := lspostgres.New(log, "ntx_success", s, db)
 	require.NoError(t, err)
 	tab := lspostgres.Script("T", "CREATE TABLE IF NOT EXISTS st_tab (id int)")
-	// Idempotent DDL (guarded table create) should execute non-transactionally only if classification downgrades (it doesn't here), so force non-tx via CONCURRENTLY index guarded
 	idx := lspostgres.Script("IDX", "CREATE INDEX CONCURRENTLY IF NOT EXISTS st_idx ON st_tab (id)")
 	dbase.Migrations("NTX_SUCCESS", tab, idx)
 	require.NoError(t, s.Migrate(context.Background()))
-	// Validate index exists
-	row := db.QueryRow(`SELECT 1 FROM pg_indexes WHERE indexname = 'st_idx' AND schemaname = $1`, "public")
+	row := db.QueryRow(`SELECT 1 FROM pg_indexes WHERE indexname = 'st_idx' AND schemaname = $1`, ops.SchemaOverride)
 	var one int
 	require.NoError(t, row.Scan(&one))
 }

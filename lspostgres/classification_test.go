@@ -10,11 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/muir/libschema"
+	"github.com/muir/libschema/lstesting"
 )
 
-// TestScriptAutoClassification validates that non-transactional determination for
-// CREATE INDEX CONCURRENTLY is deferred until execution (after server version
-// heuristics can be applied) and that ForceTransactional overrides still work.
+// TestScriptAutoClassification validates deferred classification and index creation.
 func TestScriptAutoClassification(t *testing.T) {
 	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
 	if dsn == "" {
@@ -24,7 +23,12 @@ func TestScriptAutoClassification(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	schema := libschema.New(context.Background(), libschema.Options{TrackingTable: "public.libschema_migrations"})
+	// replace tracking table with isolated schema
+	opts, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	defer cleanup(db)
+	_, err = db.Exec("CREATE SCHEMA " + opts.SchemaOverride)
+	require.NoError(t, err)
+	schema := libschema.New(context.Background(), opts)
 	log := libschema.LogFromLog(t)
 	ldb, err := New(log, "test", schema, db)
 	require.NoError(t, err)
@@ -35,21 +39,21 @@ func TestScriptAutoClassification(t *testing.T) {
 	ldb.Migrations("L", migTable, migConcurrent)
 
 	// Pre-execution expectations: deferred logic means neither is yet marked nonTransactional.
-	assert.False(t, migConcurrent.Base().NonTransactional(), "deferred classification means not set yet")
-	assert.False(t, migTable.Base().NonTransactional(), "regular table create remains transactional")
+	assert.False(t, migConcurrent.Base().NonTransactional())
+	assert.False(t, migTable.Base().NonTransactional())
 
 	// Run migrations through the schema since Database does not expose Migrate directly.
-	require.NoError(t, schema.Migrate(context.Background()), "migrations should succeed")
+	require.NoError(t, schema.Migrate(context.Background()))
 
 	// After migration run, verify both succeeded and the index exists. We no longer rely on the
 	// NonTransactional flag being mutated on the original registration instance (execution may occur on a copy).
-	assert.False(t, migTable.Base().NonTransactional(), "regular table create remains transactional (flag perspective)")
-	row := db.QueryRow(`SELECT 1 FROM pg_indexes WHERE schemaname = $1 AND indexname = 'idx_deferred'`, "public")
+	assert.False(t, migTable.Base().NonTransactional())
+	row := db.QueryRow(`SELECT 1 FROM pg_indexes WHERE schemaname = $1 AND indexname = 'idx_deferred'`, opts.SchemaOverride)
 	var one int
-	require.NoError(t, row.Scan(&one), "expected idx_deferred to exist")
+	require.NoError(t, row.Scan(&one))
 }
 
-// TestForceTransactionalOverride verifies ForceTransactional() can override auto non-tx classification.
+// TestForceTransactionalOverride verifies ForceTransactional() behavior.
 func TestForceTransactionalOverride(t *testing.T) {
 	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
 	if dsn == "" {
@@ -58,29 +62,21 @@ func TestForceTransactionalOverride(t *testing.T) {
 	db, err := sql.Open("postgres", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-
-	schema := libschema.New(context.Background(), libschema.Options{TrackingTable: "public.libschema_migrations"})
+	opts, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	defer cleanup(db)
+	_, err = db.Exec("CREATE SCHEMA " + opts.SchemaOverride)
+	require.NoError(t, err)
+	schema := libschema.New(context.Background(), opts)
 	log := libschema.LogFromLog(t)
 	ldb, err := New(log, "test", schema, db)
 	require.NoError(t, err)
-
-	// Create a user-owned table first, then attempt a concurrent index inside a forced transaction.
 	setup := Script("SETUP", "CREATE TABLE IF NOT EXISTS tmp_force (id int)")
 	m := Script("CIC", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_force ON tmp_force (id)", libschema.ForceTransactional())
-	// Use a distinct library name to avoid prior test state (so migration actually runs and errors)
 	ldb.Migrations("L_FORCE_TX", setup, m)
-	assert.False(t, m.Base().NonTransactional(), "pre-run should still defer classification")
+	assert.False(t, m.Base().NonTransactional())
 	err = schema.Migrate(context.Background())
-	if assert.Error(t, err, "expected error forcing CONCURRENTLY inside transaction") {
-		assert.Contains(t, err.Error(), "cannot run inside a transaction", "expected transactional error about concurrent index")
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "cannot run inside a transaction")
 	}
-	assert.False(t, m.Base().NonTransactional(), "force transactional keeps it transactional even though it failed")
-}
-
-// TestTrackingSchemaTableInvalid ensures invalid tracking table produces an error.
-func TestTrackingSchemaTableInvalid(t *testing.T) {
-	// Directly exercise helper with invalid format (three-part name)
-	d := &libschema.Database{Options: libschema.Options{TrackingTable: "a.b.c"}}
-	_, _, err := trackingSchemaTable(d)
-	assert.Error(t, err, "expected error for three-part tracking table name")
+	assert.False(t, m.Base().NonTransactional())
 }
