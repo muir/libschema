@@ -23,10 +23,10 @@ func TestMySQLGenerateClassification(t *testing.T) {
 	log := libschema.LogFromLog(t)
 	dbase, _, err := lsmysql.New(log, "gen_cls", s, db)
 	require.NoError(t, err)
-
 	ddl := lsmysql.Generate("DDL", func(_ context.Context, _ *sql.Tx) string { return "CREATE TABLE IF NOT EXISTS gen_cls (id int)" })
 	dml := lsmysql.Generate("DML", func(_ context.Context, _ *sql.Tx) string { return "INSERT INTO gen_cls (id) VALUES (1)" })
-	dbase.Migrations("GEN_LIB", ddl, dml)
+	forced := lsmysql.Generate("FORCED_NONTX", func(_ context.Context, _ *sql.Tx) string { return "INSERT INTO gen_cls (id) VALUES (2)" }, libschema.ForceNonTransactional())
+	dbase.Migrations("GEN_LIB", ddl, dml, forced)
 	require.NoError(t, s.Migrate(context.Background()))
 
 	// Lookup stored copies (Database stores migrated copies) and inspect nonTransactional flag state
@@ -35,12 +35,15 @@ func TestMySQLGenerateClassification(t *testing.T) {
 	dmlStored, ok := dbase.Lookup(libschema.MigrationName{Library: "GEN_LIB", Name: "DML"})
 	require.True(t, ok)
 	assert.True(t, ddlStored.Base().NonTransactional(), "DDL migration should be downgraded to non-tx")
-	assert.False(t, dmlStored.Base().NonTransactional(), "DML migration should remain transactional")
+	assert.False(t, dmlStored.Base().NonTransactional(), "ordinary DML migration should remain transactional")
+	forcedStored, ok := dbase.Lookup(libschema.MigrationName{Library: "GEN_LIB", Name: "FORCED_NONTX"})
+	require.True(t, ok)
+	assert.True(t, forcedStored.Base().ForcedNonTransactional(), "forced non-tx DML Generate should be marked forced non-transactional")
 
 	// Verify row inserted
 	var cnt int
 	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM gen_cls").Scan(&cnt))
-	assert.Equal(t, 1, cnt)
+	assert.Equal(t, 2, cnt)
 }
 
 // TestMySQLGenerateForceTransactionalError ensures forcing transactional on DDL causes error.

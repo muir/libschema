@@ -74,7 +74,6 @@ func TestNonTxNonIdempotentEasyFixError(t *testing.T) {
 }
 
 // TestNonTxNonIdempotentGenericError generic non-idempotent without easy fix.
-// Removed fragile generic non-idempotent execution test (CREATE DATABASE). Classification coverage exists elsewhere.
 
 // TestNonTxSuccessIdempotent verifies a successful non-transactional idempotent migration.
 func TestNonTxSuccessIdempotent(t *testing.T) {

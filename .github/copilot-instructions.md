@@ -2,6 +2,10 @@
 
 One page. No ambiguity. Follow or reject the change.
 
+## Good engineering
+- always prefer to remove code than to add it
+- always look for ways to simplify
+
 ## Core
 - Remove things completely. No placeholders, stubs, TODO, commentary about removal. History lives only in git.
 - No historical or refactor narration comments. Comments only explain current behavior, invariants, limits, dialect nuances, or (released) API deprecations.

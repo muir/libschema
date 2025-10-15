@@ -1,12 +1,12 @@
 package migutil
 
 import (
-    "strings"
+	"strings"
 
-    "github.com/memsql/errors"
+	"github.com/memsql/errors"
 
-    "github.com/muir/libschema"
-    "github.com/muir/libschema/internal/stmtclass"
+	"github.com/muir/libschema"
+	"github.com/muir/libschema/internal/stmtclass"
 )
 
 // CheckNonIdempotentDDLFix validates DDL idempotency requirements. For any statement flagged as
@@ -19,8 +19,12 @@ func CheckNonIdempotentDDLFix(
 ) error {
 	for _, st := range stmts {
 		flags := st.Flags
-		if flags&stmtclass.IsDDL == 0 { continue }
-		if flags&stmtclass.IsNonIdempotent == 0 { continue }
+		if flags&stmtclass.IsDDL == 0 {
+			continue
+		}
+		if flags&stmtclass.IsNonIdempotent == 0 {
+			continue
+		}
 		if hasSkipIf { // tolerated under SkipIf contract
 			continue
 		}
