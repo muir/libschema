@@ -157,14 +157,23 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 					_ = tx.Rollback()
 				}
 			}()
-			tx, err = db.BeginTx(ctx, d.Options.MigrationTxOptions)
+			opts := d.Options.MigrationTxOptions
+			if pm.genFn != nil && m.Base().ForcedNonTransactional() { // forced downgrade generate: use READ COMMITTED
+				if opts == nil {
+					opts = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+				} else {
+					cpy := *opts
+					cpy.Isolation = sql.LevelReadCommitted
+					opts = &cpy
+				}
+			}
+			tx, err = db.BeginTx(ctx, opts)
 			if err != nil {
 				return nil, errors.Wrapf(err, "begin Tx for migration %s", m.Base().Name)
 			}
 			if err := applySchemaOverridePostgres(ctx, tx, d.Options.SchemaOverride, m.Base().Name.Name); err != nil {
 				return nil, err
 			}
-			// TODO: change transaction mode if forced non-transactional
 			return tx, nil
 		},
 		BodyTx: func(ctx context.Context, tx *sql.Tx) error {

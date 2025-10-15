@@ -199,7 +199,17 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 		DB:  rawDB,
 		Log: log,
 		BeginTx: func(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
-			tx, err := db.BeginTx(ctx, d.Options.MigrationTxOptions)
+			opts := d.Options.MigrationTxOptions
+			if pm.genFn != nil && m.Base().ForcedNonTransactional() { // forced downgrade generate: use READ COMMITTED
+				if opts == nil {
+					opts = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+				} else {
+					cpy := *opts
+					cpy.Isolation = sql.LevelReadCommitted
+					opts = &cpy
+				}
+			}
+			tx, err := db.BeginTx(ctx, opts)
 			if err != nil {
 				return nil, errors.Wrapf(err, "begin Tx for migration %s", m.Base().Name)
 			}
