@@ -27,6 +27,21 @@ func TestBadMigrationsMysql(t *testing.T) {
 	}
 	cases := []testCase{
 		{
+			name:      "computed mismatch",
+			substring: "cannot force non-transactional",
+			define: func(dbase *libschema.Database) {
+				dbase.Migrations("L_MISMATCH", lsmysql.Computed[*sql.Tx]("C_MISMATCH", func(context.Context, *sql.Tx) error { return nil }, libschema.ForceNonTransactional()))
+			},
+		},
+		{
+			name:      "computed failure",
+			substring: "boom-fail-mysql",
+			define: func(dbase *libschema.Database) {
+				failErr := errors.New("boom-fail-mysql")
+				dbase.Migrations("L_FAIL", lsmysql.Computed[*sql.Tx]("BAD", func(context.Context, *sql.Tx) error { return failErr }))
+			},
+		},
+		{
 			name:      "table missing",
 			substring: `.T1' doesn't exist`,
 			define: func(dbase *libschema.Database) {
