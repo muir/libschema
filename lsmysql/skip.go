@@ -3,7 +3,7 @@ package lsmysql
 import (
 	"database/sql"
 
-	"github.com/pkg/errors"
+	"github.com/memsql/errors"
 )
 
 // ColumnDefault returns the default value for a column.  If there

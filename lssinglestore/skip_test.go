@@ -7,14 +7,16 @@ import (
 	"testing"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lssinglestore"
 	"github.com/muir/libschema/lstesting"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSingleStoreSkipFunctions(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("LIBSCHEMA_SINGLESTORE_TEST_DSN")
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_SINGLESTORE_TEST_DSN to test SingleStore support in libschema/lssinglestore")
@@ -27,38 +29,37 @@ func TestSingleStoreSkipFunctions(t *testing.T) {
 	t.Log("DSN=", dsn)
 	db, err := sql.Open("mysql", dsn)
 	require.NoError(t, err, "open database")
-	defer func() {
-		assert.NoError(t, db.Close())
-	}()
-	_ = cleanup
-	// defer cleanup(db)
+	defer func() { assert.NoError(t, db.Close()) }()
+	defer func() { cleanup(db) }()
 
 	dbase, m, err := lssinglestore.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
 
 	dbase.Migrations("T",
 		lssinglestore.Script("setup1", `
-			CREATE ROWSTORE TABLE IF NOT EXISTS users (
-				id	varchar(255),
-				level	integer DEFAULT 37,
-				xyz	text,
-				other	integer,
-				SHARD KEY (id),
-				PRIMARY KEY (id)
-			)`),
+				CREATE ROWSTORE TABLE IF NOT EXISTS users (
+					id	varchar(255),
+					level	integer DEFAULT 37,
+					xyz	text,
+					other	integer,
+					SHARD KEY (id),
+					PRIMARY KEY (id)
+				)`),
 		lssinglestore.Script("setup2", `
-			CREATE TABLE IF NOT EXISTS accounts (
-				id	varchar(255)
-			)`),
+				CREATE TABLE IF NOT EXISTS accounts (
+					id	varchar(255)
+				)`),
 		lssinglestore.Script("setup3", `
-			ALTER TABLE users
-				ADD KEY hi_level (other, id)`,
+				ALTER TABLE users
+					ADD KEY hi_level (other, id)`,
+			libschema.ForceNonTransactional(),
 			libschema.SkipIf(func() (bool, error) {
-				t, _, err := m.GetTableConstraint("users", "hi_level")
-				return t != "", err
+				b, err := m.TableHasIndex("users", "hi_level")
+				return b, err
 			})),
 		lssinglestore.Script("setup4", `
-			CREATE INDEX level_idx ON users(level);`,
+				CREATE INDEX level_idx ON users(level);`,
+			libschema.ForceNonTransactional(),
 			libschema.SkipIf(func() (bool, error) {
 				b, err := m.TableHasIndex("users", "level_idx")
 				return b, err

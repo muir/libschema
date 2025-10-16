@@ -9,10 +9,13 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/memsql/errors"
+	"github.com/muir/sqltoken"
+
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"
-
-	"github.com/pkg/errors"
+	"github.com/muir/libschema/internal/migfinalize"
+	"github.com/muir/libschema/internal/stmtclass"
 )
 
 // MySQL is a libschema.Driver for connecting to MySQL-like databases that
@@ -50,6 +53,25 @@ type MySQL struct {
 	skipDatabase        bool
 }
 
+// applySchemaOverrideMySQL sets the database (schema) for the current connection/transaction
+// if override is non-empty. It validates identifier simplicity. Works with either *sql.Tx
+// or *sql.DB (passed as interface) executing USE outside of a transaction when needed.
+func applySchemaOverrideMySQL(ctx context.Context, execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, override, migName string,
+) error { // minimal interface for *sql.Tx and *sql.DB
+	if override == "" {
+		return nil
+	}
+	if !simpleIdentifierRE.MatchString(override) {
+		return errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", override)
+	}
+	if _, err := execer.ExecContext(ctx, `USE `+override); err != nil {
+		return errors.Wrapf(err, "set schema/database to %s for %s", override, migName)
+	}
+	return nil
+}
+
 type MySQLOpt func(*MySQL)
 
 // WithoutDatabase skips creating a *libschema.Database.  Without it,
@@ -84,137 +106,189 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB,
 
 type mmigration struct {
 	libschema.MigrationBase
-	script   func(context.Context, *sql.Tx) string
-	computed func(context.Context, *sql.Tx) error
+	scriptSQL  string
+	genFn      func(context.Context, *sql.Tx) (string, error)
+	computedTx func(context.Context, *sql.Tx) error
+	computedDB func(context.Context, *sql.DB) error
 }
 
 func (m *mmigration) Copy() libschema.Migration {
-	return &mmigration{
-		MigrationBase: m.MigrationBase.Copy(),
-		script:        m.script,
-		computed:      m.computed,
-	}
+	n := *m
+	n.MigrationBase = m.MigrationBase.Copy()
+	return &n
 }
+func (m *mmigration) Base() *libschema.MigrationBase { return &m.MigrationBase }
 
-func (m *mmigration) Base() *libschema.MigrationBase {
-	return &m.MigrationBase
-}
-
-// Script creates a libschema.Migration from a SQL string
+// Script defines a literal SQL statement migration.
+// To run the migration, libschema automatically chooses transactional (*sql.Tx)
+// or non-transactional (*sql.DB)
+// execution based on mysql rules for statements that cannot run inside a
+// transaction (DML (insert/update) can be in a transaction but DDL (create table, etc) cannot be).
+// The choice of transactional vs non-transactional Can be overridden with
+// ForceNonTransactional() or ForceTransactional() options.
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
-	return Generate(name, func(_ context.Context, _ *sql.Tx) string {
-		return sqlText
-	}, opts...)
-}
-
-// Generate creates a libschema.Migration from a function that returns a SQL string
-func Generate(
-	name string,
-	generator func(context.Context, *sql.Tx) string,
-	opts ...libschema.MigrationOption,
-) libschema.Migration {
-	return mmigration{
-		MigrationBase: libschema.MigrationBase{
-			Name: libschema.MigrationName{
-				Name: name,
-			},
-		},
-		script: generator,
-	}.applyOpts(opts)
-}
-
-// Computed creates a libschema.Migration from a Go function to run
-// the migration directly.
-func Computed(
-	name string,
-	action func(context.Context, *sql.Tx) error,
-	opts ...libschema.MigrationOption,
-) libschema.Migration {
-	return mmigration{
-		MigrationBase: libschema.MigrationBase{
-			Name: libschema.MigrationName{
-				Name: name,
-			},
-		},
-		computed: action,
-	}.applyOpts(opts)
-}
-
-func (m mmigration) applyOpts(opts []libschema.MigrationOption) libschema.Migration {
-	lsm := libschema.Migration(&m)
+	// Classification and validation are deferred to execution; here we only store raw SQL and options.
+	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, scriptSQL: sqlText}
+	m := libschema.Migration(pm)
 	for _, opt := range opts {
-		opt(lsm)
+		opt(m)
 	}
-	return lsm
+	return m
+}
+
+// Generate registers a callback that returns a migration in a string.
+// To run the migration, libschema automatically chooses transactional (*sql.Tx)
+// or non-transactional (*sql.DB)
+// execution based on mysql rules for statements that cannot run inside a
+// transaction (DML (insert/update) can be in a transaction but DDL (create table, etc) cannot be).
+// If the migration will be run transactionally, it will run in the same transaction
+// as the callback that returned the string. If it runs non-transactionally, the
+// transaction that returned the string will be idle (hanging around) while the migration runs.
+// The choice of transactional vs non-transactional Can be overridden with
+// ForceNonTransactional() or ForceTransactional() options.
+func Generate(name string, generator func(context.Context, *sql.Tx) string, opts ...libschema.MigrationOption) libschema.Migration {
+	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
+	pm.genFn = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, tx), nil }
+	m := libschema.Migration(pm)
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+type ConnPtr interface{ *sql.Tx | *sql.DB }
+
+// Computed defines a migration that runs arbitrary Go code.
+// The signature of the action callback determines if the migration runs
+// transactionally or if it runs outside a transaction:
+//
+//	func(context.Context, *sql.Tx) error // run transactionlly
+//	func(context.Context, *sql.DB) error // run non-transactionally
+func Computed[T ConnPtr](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
+	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
+	var zero T
+	switch any(zero).(type) {
+	case *sql.Tx:
+		pm.computedTx = func(ctx context.Context, tx *sql.Tx) error { return action(ctx, any(tx).(T)) }
+	case *sql.DB:
+		pm.SetNonTransactional(true)
+		pm.computedDB = func(ctx context.Context, db *sql.DB) error { return action(ctx, any(db).(T)) }
+	}
+	m := libschema.Migration(pm)
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // DoOneMigration applies a single migration.
 // It is expected to be called by libschema and is not
 // called internally which means that is safe to override
 // in types that embed MySQL.
-func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (result sql.Result, err error) {
-	// TODO: DRY
-	defer func() {
-		if err == nil {
-			m.Base().SetStatus(libschema.MigrationStatus{
-				Done: true,
-			})
-		}
-	}()
-	tx, err := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Begin Tx for migration %s", m.Base().Name)
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		} else {
-			err = errors.Wrapf(tx.Commit(), "Commit migration %s", m.Base().Name)
-		}
-	}()
-	if d.Options.SchemaOverride != "" {
-		if !simpleIdentifierRE.MatchString(d.Options.SchemaOverride) {
-			return nil, errors.Errorf("options.SchemaOverride must be a simple identifier, not '%s'", d.Options.SchemaOverride)
-		}
-		_, err := tx.Exec(`USE ` + d.Options.SchemaOverride)
-		if err != nil {
-			return nil, errors.Wrapf(err, "set search path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
-		}
-	}
+func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (sql.Result, error) {
 	pm := m.(*mmigration)
-	if pm.script != nil {
-		script := pm.script(ctx, tx)
-		err = CheckScript(script)
-		if errors.Is(err, ErrNonIdempotentDDL) && m.Base().HasSkipIf() {
-			// We assume the skip checks to see if the non-idempotent migration
-			// should be applied
-			err = nil
-		}
-		if err == nil {
-			result, err = tx.Exec(script)
-		}
-		err = errors.Wrap(err, script)
-	} else {
-		err = pm.computed(ctx, tx)
+	pm.ApplyForceOverride()
+	var result sql.Result
+	rawDB := d.DB()
+	f := &migfinalize.Finalizer[sql.DB, sql.Tx]{
+		Ctx: ctx,
+		DB:  rawDB,
+		Log: log,
+		BeginTx: func(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
+			opts := d.Options.MigrationTxOptions
+			if pm.genFn != nil && m.Base().ForcedNonTransactional() { // forced downgrade generate: use READ COMMITTED
+				if opts == nil {
+					opts = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+				} else {
+					cpy := *opts
+					cpy.Isolation = sql.LevelReadCommitted
+					opts = &cpy
+				}
+			}
+			tx, err := db.BeginTx(ctx, opts)
+			if err != nil {
+				return nil, errors.Wrapf(err, "begin Tx for migration %s", m.Base().Name)
+			}
+			if err := applySchemaOverrideMySQL(ctx, tx, d.Options.SchemaOverride, m.Base().Name.Name); err != nil {
+				return nil, err
+			}
+			return tx, nil
+		},
+		BodyTx: func(ctx context.Context, tx *sql.Tx) error {
+			// Computed callbacks
+			if pm.computedTx != nil {
+				if m.Base().NonTransactional() {
+					return errors.Errorf("cannot force non-transactional for *sql.Tx computed migration %s", m.Base().Name)
+				}
+				return errors.WithStack(pm.computedTx(ctx, tx))
+			}
+			if pm.computedDB != nil {
+				if !m.Base().NonTransactional() {
+					return errors.Errorf("computed *sql.DB migration %s must be non-transactional", m.Base().Name)
+				}
+				if err := applySchemaOverrideMySQL(ctx, rawDB, d.Options.SchemaOverride, m.Base().Name.Name); err != nil {
+					return err
+				}
+				return errors.WithStack(pm.computedDB(ctx, rawDB))
+			}
+			// Script or Generate path
+			sqlText := pm.scriptSQL
+			if pm.genFn != nil {
+				genSQL, gerr := pm.genFn(ctx, tx)
+				if gerr != nil {
+					return errors.WithStack(gerr)
+				}
+				sqlText = genSQL
+			}
+			sqlText = strings.TrimSpace(sqlText)
+			if sqlText == "" {
+				return nil
+			}
+			toks := sqltoken.TokenizeMySQL(sqlText)
+			stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, 0, toks)
+			if agg&stmtclass.IsDDL != 0 {
+				if agg&stmtclass.IsDML != 0 {
+					return errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
+				}
+				if m.Base().ForcedTransactional() {
+					return errors.Errorf("cannot force transactional on MySQL migration %s containing DDL", m.Base().Name)
+				}
+				if !m.Base().NonTransactional() {
+					pm.SetNonTransactional(true)
+				}
+				for _, st := range stmts {
+					if st.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) && !m.Base().HasSkipIf() {
+						return errors.Errorf("non-idempotent DDL '%s': %w", st.Text, libschema.ErrNonIdempotentDDL)
+					}
+				}
+			}
+			if !m.Base().NonTransactional() {
+				execRes, execErr := tx.ExecContext(ctx, sqlText)
+				if execErr != nil {
+					return errors.Wrap(execErr, sqlText)
+				}
+				result = execRes
+				return nil
+			}
+			if err := applySchemaOverrideMySQL(ctx, rawDB, d.Options.SchemaOverride, m.Base().Name.Name); err != nil {
+				return err
+			}
+			execRes, execErr := rawDB.ExecContext(ctx, sqlText)
+			if execErr != nil {
+				return errors.Wrap(execErr, sqlText)
+			}
+			result = execRes
+			return nil
+		},
+		SaveStatus: func(ctx context.Context, tx *sql.Tx, migErr error) error {
+			return errors.WithStack(p.saveStatus(log, tx, d, m, migErr == nil, migErr))
+		},
+		CommitTx:   func(tx *sql.Tx) error { return errors.WithStack(tx.Commit()) },
+		RollbackTx: func(tx *sql.Tx) { _ = tx.Rollback() },
+		SetDone:    func() { m.Base().SetStatus(libschema.MigrationStatus{Done: true}) },
+		SetError:   func(err error) { m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()}) },
 	}
-	if err != nil {
-		err = errors.Wrapf(err, "problem with migration %s", m.Base().Name)
-		_ = tx.Rollback()
-		ntx, txerr := d.DB().BeginTx(ctx, d.Options.MigrationTxOptions)
-		if txerr != nil {
-			return nil, errors.Wrapf(err, "tx for saving status for %s also failed with %s", m.Base().Name, txerr)
-		}
-		tx = ntx
-	}
-	txerr := p.saveStatus(log, tx, d, m, err == nil, err)
-	if txerr != nil {
-		if err == nil {
-			err = txerr
-		} else {
-			err = errors.Wrapf(err, "save status for %s also failed: %s", m.Base().Name, txerr)
-		}
-	}
-	return
+	return result, errors.WithStack(f.Run())
 }
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
@@ -473,15 +547,9 @@ func (p *MySQL) LoadStatus(ctx context.Context, _ *internal.Log, d *libschema.Da
 // called internally which means that is safe to override
 // in types that embed MySQL.
 func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ *internal.Log, migration libschema.Migration) error {
-	m, ok := migration.(*mmigration)
-	if !ok {
-		return fmt.Errorf("non-mysql migration %s registered with mysql migrations", migration.Base().Name)
+	if _, ok := migration.(*mmigration); !ok {
+		return errors.Errorf("non-mysql migration %s registered with mysql migrations", migration.Base().Name)
 	}
-	if m.script != nil {
-		return nil
-	}
-	if m.computed != nil {
-		return nil
-	}
-	return errors.Errorf("migration %s is not supported", m.Name)
+	// All mmigration instances are supported; body presence checked at execution.
+	return nil
 }

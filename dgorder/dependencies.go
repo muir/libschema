@@ -3,7 +3,7 @@ package dgorder
 import (
 	"container/heap"
 
-	"github.com/pkg/errors"
+	"github.com/memsql/errors"
 )
 
 type Node struct {
@@ -74,6 +74,7 @@ func (h *IntHeap) Push(x interface{}) {
 	// not just its contents.
 	*h = append(*h, x.(int))
 }
+
 func (h *IntHeap) Pop() interface{} {
 	old := *h
 	n := len(old)

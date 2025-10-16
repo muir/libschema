@@ -3,21 +3,22 @@ package lspostgres_test
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/memsql/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/lspostgres"
 	"github.com/muir/libschema/lstesting"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestOverrideNothing(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, &code2, nil)
@@ -27,6 +28,7 @@ func TestOverrideNothing(t *testing.T) {
 }
 
 func TestOverrideMigrateOnly(t *testing.T) {
+	t.Parallel()
 	var code string
 	assert.PanicsWithValue(t, "test exit: migrate only", func() {
 		_, _ = doConfigMigrate(t, nil, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
@@ -37,6 +39,7 @@ func TestOverrideMigrateOnly(t *testing.T) {
 }
 
 func TestOverrideMigrateDatabaseNotMatching(t *testing.T) {
+	t.Parallel()
 	var code string
 	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, nil, &libschema.OverrideOptions{
 		MigrateDatabase: "notmatching",
@@ -48,6 +51,7 @@ func TestOverrideMigrateDatabaseNotMatching(t *testing.T) {
 }
 
 func TestOverrideMigrateDatabaseMatching(t *testing.T) {
+	t.Parallel()
 	var code string
 	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
 		MigrateDatabase: "test",
@@ -57,6 +61,7 @@ func TestOverrideMigrateDatabaseMatching(t *testing.T) {
 }
 
 func TestOverrideMigrateDSNWithOneDatabase(t *testing.T) {
+	t.Parallel()
 	var code string
 	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, nil, &libschema.OverrideOptions{
 		MigrateDSN: getDSN(t),
@@ -66,6 +71,7 @@ func TestOverrideMigrateDSNWithOneDatabase(t *testing.T) {
 }
 
 func TestOverrideMigrateDSNWithoutDatabase(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), true, &code, &code2, &libschema.OverrideOptions{
@@ -79,6 +85,7 @@ func TestOverrideMigrateDSNWithoutDatabase(t *testing.T) {
 }
 
 func TestOverrideMigrateDSNWithDatabaseSpecified(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
@@ -91,6 +98,7 @@ func TestOverrideMigrateDSNWithDatabaseSpecified(t *testing.T) {
 }
 
 func TestOverrideNoMigrate(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
@@ -102,6 +110,7 @@ func TestOverrideNoMigrate(t *testing.T) {
 }
 
 func TestOverrideErrorIfMigrateNeeded(t *testing.T) {
+	t.Parallel()
 	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
 	t.Log("With ErrorIfMigrateNeeded: true we should get an error")
 	var code string
@@ -144,6 +153,7 @@ func TestOverrideErrorIfMigrateNeeded(t *testing.T) {
 }
 
 func TestOverrideEverythingSynchronous(t *testing.T) {
+	t.Parallel()
 	var code string
 	var code2 string
 	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, &code2, &libschema.OverrideOptions{
@@ -162,11 +172,14 @@ func getDSN(t *testing.T) string {
 	return dsn
 }
 
-func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expectAsync bool, code *string, code2 *string, overrides *libschema.OverrideOptions) (*sql.DB, error) {
+func init() {
 	internal.TestingMode = true // panic instead of os.Exit()
+}
+
+func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expectAsync bool, code *string, code2 *string, overrides *libschema.OverrideOptions) (*sql.DB, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open: %w", err)
+		return nil, errors.Wrap(err, "open")
 	}
 	defer func() {
 		if options == nil {
@@ -208,7 +221,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 
 		dbase2, err := lspostgres.New(libschema.LogFromLog(t), "test2", s, db)
 		if err != nil {
-			return db, fmt.Errorf("new2: %w", err)
+			return db, errors.Wrap(err, "new2")
 		}
 		dbase2.Options.OnMigrationsComplete = nil
 
@@ -223,7 +236,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 
 	dbase, err := lspostgres.New(libschema.LogFromLog(t), "test", s, db)
 	if err != nil {
-		return db, fmt.Errorf("new: %w", err)
+		return db, errors.Wrap(err, "new")
 	}
 
 	require.NotNil(t, dbase.Options.OnMigrationsComplete)
@@ -258,7 +271,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 	t.Log("migrate!")
 	err = s.Migrate(context.Background())
 	if err != nil {
-		return db, fmt.Errorf("migrate: %w", err)
+		return db, errors.Wrap(err, "migrate")
 	}
 
 	close(migrateReturned)
