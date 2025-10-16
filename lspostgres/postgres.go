@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -462,24 +463,19 @@ func (p *Postgres) ServerVersion(ctx context.Context, db *sql.DB) (major, minor 
 
 // parsePostgresServerVersion parses a PostgreSQL server_version string (e.g. "16.3", "14beta1", "15.11 (Ubuntu 15.11-....)")
 // extracting major and minor numbers. Returns (0,0) if a major version cannot be determined.
+var pgVersionRE = regexp.MustCompile(`^([0-9]+)(?:\.([0-9]+))?`)
+
 func parsePostgresServerVersion(v string) (major, minor int) {
 	if i := strings.IndexByte(v, ' '); i >= 0 { // strip trailing build details
 		v = v[:i]
 	}
-	cleaned := make([]rune, 0, len(v))
-	for _, r := range v {
-		if (r >= '0' && r <= '9') || r == '.' { // keep digits/dots until first non-digit/dot
-			cleaned = append(cleaned, r)
-		} else {
-			break
-		}
+	m := pgVersionRE.FindStringSubmatch(v)
+	if len(m) < 2 {
+		return 0, 0
 	}
-	parts := strings.Split(string(cleaned), ".")
-	if len(parts) >= 1 {
-		_, _ = fmt.Sscanf(parts[0], "%d", &major)
-	}
-	if len(parts) >= 2 {
-		_, _ = fmt.Sscanf(parts[1], "%d", &minor)
+	_, _ = fmt.Sscanf(m[1], "%d", &major)
+	if len(m) >= 3 && m[2] != "" {
+		_, _ = fmt.Sscanf(m[2], "%d", &minor)
 	}
 	if major == 0 {
 		return 0, 0

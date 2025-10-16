@@ -151,11 +151,25 @@ does not apply to `Compute()`ed migrations.
 
 ### PostgreSQL non-transactional (idempotent) DDL
 
-Some PostgreSQL statements (e.g. `CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`, `REFRESH MATERIALIZED VIEW CONCURRENTLY`) cannot run inside an explicit transaction block. Libschema auto-detects common patterns in `Script(...)` and will execute those outside a transaction; you can also opt in explicitly by using a generic type that is *not* a `*sql.Tx` (e.g. `Generate[*sql.DB]`). Non-transactional migrations must be idempotent: safe to retry after partial failure. A fuller rationale, supported patterns, and enum/value guidance live in `lspostgres/NON_TRANSACTIONAL.md`.
+Some PostgreSQL statements (e.g. `CREATE INDEX CONCURRENTLY`, `DROP
+INDEX CONCURRENTLY`, `REFRESH MATERIALIZED VIEW CONCURRENTLY`)
+cannot run inside an explicit transaction block. Libschema auto-detects
+common patterns in `Script(...)` and will execute those outside a
+transaction; you can also opt in explicitly by using a generic type
+that is *not* a `*sql.Tx` (e.g. `Generate[*sql.DB]`). Non-transactional
+migrations must be idempotent: safe to retry after partial failure.
+A fuller rationale, supported patterns, and enum/value guidance
+live in `lspostgres/NON_TRANSACTIONAL.md`.
 
 ### RepeatUntilNoOp (brief)
 
-`RepeatUntilNoOp()` re-runs a single DML statement until `RowsAffected()==0`. Use only for pure data updates where the driver reports accurate counts. Avoid DDL, guarded `CREATE ... IF NOT EXISTS`, concurrent index / materialized view commands, or multi-statement scripts. For anything more complex, prefer a `Computed` migration and loop explicitly. See the Go doc comment on `RepeatUntilNoOp` for detailed guidance.
+`RepeatUntilNoOp()` re-runs a single DML statement until
+`RowsAffected()==0`. Use only for pure data updates where the driver
+reports accurate counts. Avoid DDL, guarded `CREATE ... IF NOT
+EXISTS`, concurrent index / materialized view commands, or
+multi-statement scripts. For anything more complex, prefer a
+`Computed` migration and loop explicitly. See the Go doc comment
+on `RepeatUntilNoOp` for detailed guidance.
 
 ## Command line
 

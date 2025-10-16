@@ -35,5 +35,3 @@ func CheckNonIdempotentDDLFix(
 	}
 	return nil
 }
-
-// (Former helper functions removed as they added indirection without meaningful reuse.)

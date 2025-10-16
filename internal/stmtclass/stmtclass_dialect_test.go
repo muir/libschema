@@ -61,6 +61,6 @@ func TestGuardInStringLiteral(t *testing.T) {
 	toks := sqltoken.TokenizeMySQL(sql)
 	_, agg := ClassifyTokens(DialectMySQL, 0, toks)
 	// Because regex matches inside literals, current behavior will incorrectly drop NonIdempotent flag.
-	// We assert current (permissive) behavior to lock it; consider tightening in future.
+	// We assert current (permissive) behavior to lock it
 	require.Zero(t, agg&IsNonIdempotent, "expected idempotent classification due to naive regex, got non-idempotent flags=0x%x", agg)
 }
