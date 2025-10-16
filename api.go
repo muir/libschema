@@ -6,7 +6,7 @@ import (
 
 	"github.com/muir/libschema/internal"
 
-	"github.com/pkg/errors"
+	"github.com/memsql/errors"
 )
 
 const DefaultTrackingTable = "libschema.migration_status"
@@ -46,14 +46,15 @@ type MigrationOption func(Migration)
 
 // Migration defines a single database defintion update.
 type MigrationBase struct {
-	Name            MigrationName
-	async           bool
-	rawAfter        []MigrationName
-	order           int // overall desired ordring across all libraries, ignores runAfter
-	status          MigrationStatus
-	skipIf          func() (bool, error)
-	skipRemainingIf func() (bool, error)
-	repeatUntilNoOp bool
+	Name             MigrationName
+	async            bool
+	rawAfter         []MigrationName
+	order            int // overall desired ordring across all libraries, ignores runAfter
+	status           MigrationStatus
+	skipIf           func() (bool, error)
+	skipRemainingIf  func() (bool, error)
+	repeatUntilNoOp  bool
+	nonTransactional bool // set automatically based on migration function generic type (TxLike vs not)
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -288,6 +289,21 @@ func (m *MigrationBase) SetStatus(status MigrationStatus) {
 
 func (m *MigrationBase) HasSkipIf() bool {
 	return m.skipIf != nil
+}
+
+// NonTransactional reports if the migration must not be wrapped in a transaction.
+// This is automatically set for drivers (e.g. Postgres) that provide generic
+// migration helpers which infer non-transactional status from the connection
+// type used (e.g. *sql.DB vs *sql.Tx). A migration marked nonTransactional will
+// be executed without an encompassing BEGIN/COMMIT; status recording still
+// occurs within its own small transaction when supported.
+func (m *MigrationBase) NonTransactional() bool {
+	return m.nonTransactional
+}
+
+// SetNonTransactional marks a migration as non-transactional. Intended for driver generic helpers.
+func (m *MigrationBase) SetNonTransactional(v bool) {
+	m.nonTransactional = v
 }
 
 func (n MigrationName) String() string {

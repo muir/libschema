@@ -1,22 +1,16 @@
 package lsmysql
 
 import (
-	"fmt"
-	"regexp"
-	"strings"
-
+	"github.com/memsql/errors"
+	"github.com/muir/libschema/internal/stmtcheck"
 	"github.com/muir/sqltoken"
-	"github.com/pkg/errors"
 )
 
 var (
-	// ErrDataAndDDL is returned when a migration combines DML and DDL
-	ErrDataAndDDL = errors.New("migration combines DDL (Data Definition Language [schema changes]) and data manipulation")
-
-	// ErrNonIdempotentDDL is returned when a migration has non-idempotent DDL
-	ErrNonIdempotentDDL = errors.New("unconditional migration has non-idempotent DDL (Data Definition Language [schema changes])")
-
-	ifExistsRE = regexp.MustCompile(`(?i)\bIF (?:NOT )?EXISTS\b`)
+	// ErrDataAndDDL indicates a script mixes data-changing and schema-changing statements
+	ErrDataAndDDL = stmtcheck.ErrDataAndDDL
+	// ErrNonIdempotentDDL indicates a DDL statement lacking an IF (NOT) EXISTS guard
+	ErrNonIdempotentDDL = stmtcheck.ErrNonIdempotentDDL
 )
 
 // CheckScript attempts to validate that an SQL command does not do
@@ -24,33 +18,15 @@ var (
 // will be (when checked with errors.Is()) nil, ErrDataAndDDL, or
 // ErrNonIdempotentDDL.
 func CheckScript(s string) error {
-	var seenDDL string
-	var seenData string
-	var nonIdempotent string
 	ts := sqltoken.TokenizeMySQL(s)
-	for _, cmd := range ts.Strip().CmdSplit() {
-		word := strings.ToLower(cmd[0].Text)
-		switch word {
-		case "alter", "rename", "create", "drop", "comment":
-			seenDDL = cmd.String()
-			if !ifExistsRE.MatchString(cmd.String()) {
-				nonIdempotent = cmd.String()
-			}
-		case "truncate":
-			seenDDL = cmd.String()
-		case "use", "set":
-			// neither
-		case "values", "table", "select":
-			// doesn't modify anything
-		case "call", "delete", "do", "handler", "import", "insert", "load", "replace", "update", "with":
-			seenData = cmd.String()
-		}
+	err := stmtcheck.AnalyzeTokens(ts)
+	if err == nil {
+		return nil
 	}
-	if seenDDL != "" && seenData != "" {
-		return fmt.Errorf("data command '%s' combined with DDL command '%s': %w", seenData, seenDDL, ErrDataAndDDL)
+	// Preserve error wrapping semantics referencing historical error variables
+	if errors.Is(err, stmtcheck.ErrDataAndDDL) || errors.Is(err, stmtcheck.ErrNonIdempotentDDL) {
+		return err
 	}
-	if nonIdempotent != "" {
-		return fmt.Errorf("non-idempotent DDL '%s': %w", nonIdempotent, ErrNonIdempotentDDL)
-	}
-	return nil
+	// Fallback: return as-is
+	return err
 }

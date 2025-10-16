@@ -149,6 +149,98 @@ complete.  If the migration is revised, then the later parts can
 be re-tried as long as the earlier parts are not modified.  This
 does not apply to `Compute()`ed migrations.
 
+### PostgreSQL idempotent (non-transactional) DDL
+
+Postgres has a subset of DDL that must not be executed inside a transaction
+(`CREATE INDEX CONCURRENTLY`, `REFRESH MATERIALIZED VIEW CONCURRENTLY`, some
+`ALTER TYPE ... ADD VALUE`, etc.). Such statements must run outside an explicit
+transaction block, so libschema treats them as idempotent: they must be safe to
+retry. Libschema auto-detects common patterns in the `Script(...)` helper and
+will run those migrations outside a transaction automatically. Examples detected:
+
+* `CREATE [UNIQUE] INDEX CONCURRENTLY ...`
+* `DROP INDEX CONCURRENTLY ...`
+* `REFRESH MATERIALIZED VIEW CONCURRENTLY ...`
+* `ALTER TYPE <enum> ADD VALUE ...` (treated as non-tx conservatively)
+
+If auto-detection is insufficient or you need explicit control, use the generic
+constructors directly. Forcing non-transactional execution is also an assertion
+that the migration is idempotent/retry-safe:
+
+```go
+// Force transactional explicitly
+lspostgres.Generate[*sql.Tx]("create-users", func(ctx context.Context, tx *sql.Tx) string {
+	return `CREATE TABLE users(id bigserial PRIMARY KEY, name text)`
+})
+
+// Force non-transactional explicitly (even if not auto-detected)
+lspostgres.Generate[*sql.DB]("add-concurrent-index", func(ctx context.Context, db *sql.DB) string {
+	return `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_login ON users(last_login)`
+})
+
+// Dynamic logic still infers non-transactionality from the generic type
+lspostgres.Generate[*sql.DB]("refresh-mv", func(ctx context.Context, db *sql.DB) string {
+	return `REFRESH MATERIALIZED VIEW CONCURRENTLY user_aggregate`
+})
+```
+
+Full guidelines (idempotency rules, single-statement enforcement for non-tx scripts,
+enum examples, and how to write safe computed migrations) are in
+`lspostgres/NON_TRANSACTIONAL.md`.
+
+### RepeatUntilNoOp risks and guidance
+
+`RepeatUntilNoOp()` is designed for migrations that perform a bounded amount of
+work each run (e.g. batch-updating rows) and should run repeatedly until the
+database reports "no rows changed". It relies on the `sql.Result.RowsAffected()`
+value returned by the underlying driver for the single statement or for the
+execution produced by a `Script(...)` or `Generate(...)` migration.
+
+However, several classes of statements make `RowsAffected()` unreliable or
+misleading. Using `RepeatUntilNoOp` with these can cause useless re-execution
+(looping until an internal loop cap), or premature stop, or mask partial work.
+
+Unreliable categories:
+
+1. DDL statements (CREATE / ALTER / DROP / TRUNCATE / REINDEX / VACUUM, etc.)
+	- Many drivers return 0 rows affected regardless of whether the DDL ran.
+	- Concurrent / non-transactional Postgres operations (e.g. `CREATE INDEX CONCURRENTLY`)
+	  will nearly always report 0.
+2. Idempotent guard-style statements (e.g. `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`)
+	- First run may return 0 even when it changed the schema, depending on driver behavior.
+3. Statements producing side effects without row counts (e.g. `REFRESH MATERIALIZED VIEW CONCURRENTLY`)
+	- Row count has no semantic meaning relative to "work remaining".
+4. Multi-statement `Script(...)` migrations (not allowed for non-transactional Postgres, but may occur in transactional contexts)
+	- The driver reports only the final statement’s rows (or an amalgam) which doesn't represent aggregate progress.
+5. Vendor-specific commands (e.g. MySQL `ANALYZE TABLE`, `OPTIMIZE TABLE`) that always return a fixed metadata result.
+
+Guidelines:
+
+* Prefer `Computed` migrations when doing repeat-until-empty work. Inside the function you can loop, perform small batches, and stop precisely when exhausted—without relying on `RowsAffected`.
+* Only use `RepeatUntilNoOp` for a single, data-changing DML statement where the driver’s row count is trustworthy (INSERT/UPDATE/DELETE on InnoDB/MySQL, Postgres standard DML, etc.).
+* Avoid combining it with any DDL (even guarded with IF EXISTS / IF NOT EXISTS). DDL should generally be a one-shot migration.
+* For Postgres non-transactional idempotent scripts, do not pair with `RepeatUntilNoOp`; treat them as single-execution steps. If they need conditional logic, switch to a computed migration.
+* If you suspect a statement could return a spurious 0 early, add logging around first execution instead of relying solely on the repetition logic.
+
+Failure patterns to watch for:
+
+| Pattern | Symptom | Fix |
+|---------|---------|-----|
+| DDL under RepeatUntilNoOp | Always repeats once then stops (0) | Remove RepeatUntilNoOp |
+| Idempotent guarded CREATE INDEX IF NOT EXISTS | Might rerun uselessly if driver lies (still 0) | Use plain script (one run) |
+| Batch UPDATE with trigger-side effects | Row count may be lower than actual logical work | Use computed loop (explicit queries) |
+
+Migration author checklist for using `RepeatUntilNoOp`:
+
+1. Is the statement pure DML (no DDL keywords)?
+2. Does the driver reliably report affected rows for this statement type?
+3. Can partial failure safely be retried without harming subsequent logic?
+4. Is it a single statement? (If not, refactor or use computed.)
+
+If any answer is “no”, switch to a `Computed` migration and manage the loop manually.
+
+In the future libschema may add defensive warnings (debug log) when `RepeatUntilNoOp` is paired with likely-unreliable statements; until then, treat this section as normative guidance.
+
 ## Command line
 
 The `OverrideOptions` can be added as command line flags that 

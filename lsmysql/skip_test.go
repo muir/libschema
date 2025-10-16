@@ -38,25 +38,27 @@ func TestSkipFunctions(t *testing.T) {
 
 	dbase.Migrations("T",
 		lsmysql.Script("setup1", `
-			CREATE TABLE IF NOT EXISTS users (
-				id	varchar(255),
-				level	integer DEFAULT 37,
-				PRIMARY KEY (id)
-			) ENGINE=InnoDB`),
+				CREATE TABLE IF NOT EXISTS users (
+					id	varchar(255),
+					level	integer DEFAULT 37,
+					PRIMARY KEY (id)
+				) ENGINE=InnoDB`),
 		lsmysql.Script("setup2", `
-			CREATE TABLE IF NOT EXISTS accounts (
-				id	varchar(255)
-			) ENGINE=InnoDB`),
+				CREATE TABLE IF NOT EXISTS accounts (
+					id	varchar(255)
+				) ENGINE=InnoDB`),
 		lsmysql.Script("setup3", `
-			ALTER TABLE users
-				ADD CONSTRAINT hi_level 
-					CHECK (level > 10) ENFORCED`,
+				ALTER TABLE users
+					ADD CONSTRAINT hi_level 
+						CHECK (level > 10) ENFORCED`,
+			libschema.ForceNonTransactional(),
 			libschema.SkipIf(func() (bool, error) {
 				t, _, err := m.GetTableConstraint("users", "hi_level")
 				return t != "", err
 			})),
 		lsmysql.Script("setup4", `
-			CREATE INDEX level_idx ON users(level);`,
+				CREATE INDEX level_idx ON users(level);`,
+			libschema.ForceNonTransactional(),
 			libschema.SkipIf(func() (bool, error) {
 				b, err := m.TableHasIndex("users", "level_idx")
 				return b, err

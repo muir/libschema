@@ -8,8 +8,8 @@ import (
 	"github.com/muir/libschema/internal"
 
 	"github.com/hashicorp/go-multierror"
+	"github.com/memsql/errors"
 	"github.com/muir/libschema/dgorder"
-	"github.com/pkg/errors"
 )
 
 // Migrate runs pending migrations that have been registered as long as
@@ -75,7 +75,7 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 			return err
 		}
 	}
-	return
+	return err
 }
 
 func (d *Database) prepare(ctx context.Context) error {

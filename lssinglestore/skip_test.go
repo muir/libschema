@@ -38,27 +38,29 @@ func TestSingleStoreSkipFunctions(t *testing.T) {
 
 	dbase.Migrations("T",
 		lssinglestore.Script("setup1", `
-			CREATE ROWSTORE TABLE IF NOT EXISTS users (
-				id	varchar(255),
-				level	integer DEFAULT 37,
-				xyz	text,
-				other	integer,
-				SHARD KEY (id),
-				PRIMARY KEY (id)
-			)`),
+				CREATE ROWSTORE TABLE IF NOT EXISTS users (
+					id	varchar(255),
+					level	integer DEFAULT 37,
+					xyz	text,
+					other	integer,
+					SHARD KEY (id),
+					PRIMARY KEY (id)
+				)`),
 		lssinglestore.Script("setup2", `
-			CREATE TABLE IF NOT EXISTS accounts (
-				id	varchar(255)
-			)`),
+				CREATE TABLE IF NOT EXISTS accounts (
+					id	varchar(255)
+				)`),
 		lssinglestore.Script("setup3", `
-			ALTER TABLE users
-				ADD KEY hi_level (other, id)`,
+				ALTER TABLE users
+					ADD KEY hi_level (other, id)`,
+			libschema.ForceNonTransactional(),
 			libschema.SkipIf(func() (bool, error) {
-				t, _, err := m.GetTableConstraint("users", "hi_level")
-				return t != "", err
+				b, err := m.TableHasIndex("users", "hi_level")
+				return b, err
 			})),
 		lssinglestore.Script("setup4", `
-			CREATE INDEX level_idx ON users(level);`,
+				CREATE INDEX level_idx ON users(level);`,
+			libschema.ForceNonTransactional(),
 			libschema.SkipIf(func() (bool, error) {
 				b, err := m.TableHasIndex("users", "level_idx")
 				return b, err

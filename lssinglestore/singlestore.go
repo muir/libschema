@@ -13,7 +13,7 @@ import (
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/lsmysql"
 
-	"github.com/pkg/errors"
+	"github.com/memsql/errors"
 )
 
 // SingleStore is a libschema.Driver for connecting to SingleStore databases.
@@ -70,24 +70,17 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 	return lsmysql.Script(name, sqlText, opts...)
 }
 
-// Generate creates a libschema.Migration from a function that returns a SQL string
-func Generate(
-	name string,
-	generator func(context.Context, *sql.Tx) string,
-	opts ...libschema.MigrationOption,
-) libschema.Migration {
-	return lsmysql.Generate(name, generator, opts...)
+func Generate[T lsmysql.ExecConn](name string, generator func(context.Context, T) string, opts ...libschema.MigrationOption) libschema.Migration {
+	return lsmysql.Generate[T](name, generator, opts...)
 }
 
-// Computed creates a libschema.Migration from a Go function to run
-// the migration directly.
-func Computed(
-	name string,
-	action func(context.Context, *sql.Tx) error,
-	opts ...libschema.MigrationOption,
-) libschema.Migration {
-	return lsmysql.Computed(name, action, opts...)
+func Computed[T lsmysql.ExecConn](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
+	return lsmysql.Computed[T](name, action, opts...)
 }
+
+// Re-export force options for convenience.
+func ForceNonTransactional() libschema.MigrationOption { return lsmysql.ForceNonTransactional() }
+func ForceTransactional() libschema.MigrationOption    { return lsmysql.ForceTransactional() }
 
 // LockMigrationsTable locks the migration tracking table for exclusive use by the
 // migrations running now.

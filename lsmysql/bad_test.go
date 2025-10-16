@@ -6,7 +6,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/memsql/errors"
 	"github.com/muir/libschema"
+	"github.com/muir/libschema/internal/stmtcheck"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lspostgres"
 	"github.com/muir/libschema/lstesting"
@@ -15,15 +17,17 @@ import (
 )
 
 func TestBadMigrationsMysql(t *testing.T) {
-	cases := []struct {
-		name   string
-		error  string
-		define func(*libschema.Database)
-		reopt  func(o *libschema.Options)
-	}{
+	type testCase struct {
+		name      string
+		substring string
+		sentinel  error
+		define    func(*libschema.Database)
+		reopt     func(o *libschema.Options)
+	}
+	cases := []testCase{
 		{
-			name:  "table missing",
-			error: `.T1' doesn't exist`,
+			name:      "table missing",
+			substring: `.T1' doesn't exist`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2",
 					lsmysql.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`),
@@ -31,8 +35,8 @@ func TestBadMigrationsMysql(t *testing.T) {
 			},
 		},
 		{
-			name:  "wrong db",
-			error: `non-mysql`,
+			name:      "wrong db",
+			substring: `non-mysql`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2",
 					lspostgres.Script("T4", `INSERT INTO T1 (id) VALUES ('T4')`),
@@ -40,37 +44,37 @@ func TestBadMigrationsMysql(t *testing.T) {
 			},
 		},
 		{
-			name:  "duplicate library",
-			error: `duplicate library 'L2'`,
+			name:      "duplicate library",
+			substring: `duplicate library 'L2'`,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2", lsmysql.Script("T4", `CREATE TABLE T1 (id text)`))
 				dbase.Migrations("L2", lsmysql.Script("T5", `CREATE TABLE T2 (id text)`))
 			},
 		},
 		{
-			name:  "bad table1",
-			error: `tracking table 'foo.bar.baz' is not valid`,
+			name:      "bad table1",
+			substring: `tracking table 'foo.bar.baz' is not valid`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "foo.bar.baz"
 			},
 		},
 		{
-			name:  "bad table2",
-			error: `tracking table schema name must be a simple identifier, not 'foo'bar'`,
+			name:      "bad table2",
+			substring: `tracking table schema name must be a simple identifier, not 'foo'bar'`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "foo'bar.baz"
 			},
 		},
 		{
-			name:  "non idempotent",
-			error: `unconditional migration has non-idempotent DDL (Data Definition Language [schema changes]`,
+			name:     "non idempotent",
+			sentinel: stmtcheck.ErrNonIdempotentDDL,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2", lsmysql.Script("T4", `CREATE TABLE T1 (id text) TYPE = InnoDB`))
 			},
 		},
 		{
-			name:  "combines data & ddl",
-			error: `migration combines DDL (Data Definition Language [schema changes]) and data manipulation`,
+			name:     "combines data & ddl",
+			sentinel: stmtcheck.ErrDataAndDDL,
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L2", lsmysql.Script("T4", `
 					CREATE TABLE IF NOT EXISTST1 (id text) TYPE = InnoDB;
@@ -79,22 +83,22 @@ func TestBadMigrationsMysql(t *testing.T) {
 			},
 		},
 		{
-			name:  "bad table3",
-			error: `tracking table table name must be a simple identifier, not 'bar'baz'`,
+			name:      "bad table3",
+			substring: `tracking table table name must be a simple identifier, not 'bar'baz'`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "foo.bar'baz"
 			},
 		},
 		{
-			name:  "bad table4",
-			error: `tracking table table name must be a simple identifier, not 'bar'baz'`,
+			name:      "bad table4",
+			substring: `tracking table table name must be a simple identifier, not 'bar'baz'`,
 			reopt: func(o *libschema.Options) {
 				o.TrackingTable = "bar'baz"
 			},
 		},
 		{
-			name:  "bad schema",
-			error: `options.SchemaOverride must be a simple identifier`,
+			name:      "bad schema",
+			substring: `options.SchemaOverride must be a simple identifier`,
 			reopt: func(o *libschema.Options) {
 				o.SchemaOverride = `"foo."bar.baz"`
 			},
@@ -104,12 +108,12 @@ func TestBadMigrationsMysql(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			testBadMigration(t, tc.error, tc.define, tc.reopt)
+			testBadMigration(t, tc.substring, tc.sentinel, tc.define, tc.reopt)
 		})
 	}
 }
 
-func testBadMigration(t *testing.T, expected string, define func(*libschema.Database), reopt func(*libschema.Options)) {
+func testBadMigration(t *testing.T, expectedSubstring string, sentinel error, define func(*libschema.Database), reopt func(*libschema.Options)) {
 	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
@@ -142,6 +146,12 @@ func testBadMigration(t *testing.T, expected string, define func(*libschema.Data
 
 	err = s.Migrate(context.Background())
 	if assert.Error(t, err, "should error") {
-		assert.Contains(t, err.Error(), expected)
+		if sentinel != nil {
+			assert.True(t, errors.Is(err, sentinel), "expected sentinel %v got %v", sentinel, err)
+		} else if expectedSubstring != "" {
+			assert.Contains(t, err.Error(), expectedSubstring)
+		} else {
+			assert.Fail(t, "no expected substring or sentinel provided")
+		}
 	}
 }
