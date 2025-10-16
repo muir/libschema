@@ -45,23 +45,3 @@ func TestGenerateSuccess(t *testing.T) {
 	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM force_nontx_tab").Scan(&cnt))
 	assert.Equal(t, 1, cnt)
 }
-
-// TestGenerateEError ensures an error returned by the generator bubbles up and records status.
-func TestGenerateEError(t *testing.T) {
-	db := openPG(t)
-	s := libschema.New(context.Background(), libschema.Options{})
-	log := libschema.LogFromLog(t)
-	dbase, err := lspostgres.New(log, "gen_error", s, db)
-	require.NoError(t, err)
-
-	genErr := assert.AnError
-	mig := lspostgres.GenerateE("GEN_ERR", func(_ context.Context, _ *sql.Tx) (string, error) { return "", genErr })
-	dbase.Migrations("GEN_ERR_LIB", mig)
-	err = s.Migrate(context.Background())
-	require.Error(t, err, "expected migration to fail due to generator error")
-	stored, ok := dbase.Lookup(libschema.MigrationName{Library: "GEN_ERR_LIB", Name: "GEN_ERR"})
-	require.True(t, ok)
-	st := stored.Base().Status()
-	assert.False(t, st.Done)
-	assert.NotEmpty(t, st.Error)
-}

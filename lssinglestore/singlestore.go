@@ -65,29 +65,38 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 	return database, s2, nil
 }
 
-// Script creates a libschema.Migration from a SQL string
+// Script defines a literal SQL statement migration.
+// To run the migration, libschema automatically chooses transactional (*sql.Tx)
+// or non-transactional (*sql.DB)
+// execution based on SingleStore rules for statements that cannot run inside a
+// transaction (DML (insert/update) can be in a transaction but DDL (create table, etc) cannot be).
+// The choice of transactional vs non-transactional Can be overridden with
+// ForceNonTransactional() or ForceTransactional() options.
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
 	// Delegates to MySQL implementation which now applies ApplyForceOverride early.
 	return lsmysql.Script(name, sqlText, opts...)
 }
 
-// Generate creates a libschema.Migration from a function that returns a SQL string
-// Generate is the legacy convenience wrapper for a generator that does not fail.
+// Generate registers a callback that returns a migration in a string.
+// To run the migration, libschema automatically chooses transactional (*sql.Tx)
+// or non-transactional (*sql.DB)
+// execution based on SingleStore rules for statements that cannot run inside a
+// transaction (DML (insert/update) can be in a transaction but DDL (create table, etc) cannot be).
+// If the migration will be run transactionally, it will run in the same transaction
+// as the callback that returned the string. If it runs non-transactionally, the
+// transaction that returned the string will be idle (hanging around) while the migration runs.
+// The choice of transactional vs non-transactional Can be overridden with
+// ForceNonTransactional() or ForceTransactional() options.
 func Generate(name string, generator func(context.Context, *sql.Tx) string, opts ...libschema.MigrationOption) libschema.Migration {
 	return lsmysql.Generate(name, generator, opts...)
 }
 
-// GenerateE allows a generator that can return an error.
-func GenerateE(
-	name string,
-	generator func(context.Context, *sql.Tx) (string, error),
-	opts ...libschema.MigrationOption,
-) libschema.Migration {
-	return lsmysql.GenerateE(name, generator, opts...)
-}
-
-// Computed creates a libschema.Migration from a Go function to run
-// the migration directly.
+// Computed defines a migration that runs arbitrary Go code.
+// The signature of the action callback determines if the migration runs
+// transactionally or if it runs outside a transaction:
+//
+//	func(context.Context, *sql.Tx) error // run transactionlly
+//	func(context.Context, *sql.DB) error // run non-transactionally
 func Computed[T lsmysql.ConnPtr](
 	name string,
 	action func(context.Context, T) error,

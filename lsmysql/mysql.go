@@ -119,12 +119,13 @@ func (m *mmigration) Copy() libschema.Migration {
 }
 func (m *mmigration) Base() *libschema.MigrationBase { return &m.MigrationBase }
 
-// Script is a convenience helper for a literal SQL statement migration. It
-// automatically chooses transactional (*sql.Tx) or non-transactional (*sql.DB)
-// execution based on MySQL rules: DDL statements auto-commit and therefore
-// must run outside an explicit transaction. Pure DML remains transactional.
-// The choice can be asserted with ForceNonTransactional() or ForceTransactional()
-// (an error is raised if the assertion is impossible).
+// Script defines a literal SQL statement migration.
+// To run the migration, libschema automatically chooses transactional (*sql.Tx)
+// or non-transactional (*sql.DB)
+// execution based on mysql rules for statements that cannot run inside a
+// transaction (DML (insert/update) can be in a transaction but DDL (create table, etc) cannot be).
+// The choice of transactional vs non-transactional Can be overridden with
+// ForceNonTransactional() or ForceTransactional() options.
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
 	// Classification and validation are deferred to execution; here we only store raw SQL and options.
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, scriptSQL: sqlText}
@@ -135,13 +136,16 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 	return m
 }
 
-// Generate defines a migration that produces SQL inside an initial transaction
-// context (for introspection), then classifies it. If the resulting SQL contains
-// DDL that MySQL must auto-commit the migration is executed non-transactionally
-// unless ForceTransactional() was specified (which causes an error). For
-// unconditional non-transactional work prefer Script (with prewritten SQL) or a
-// Computed[*sql.DB] migration.
-// Generate is the legacy convenience wrapper for a generator that returns only a string.
+// Generate registers a callback that returns a migration in a string.
+// To run the migration, libschema automatically chooses transactional (*sql.Tx)
+// or non-transactional (*sql.DB)
+// execution based on mysql rules for statements that cannot run inside a
+// transaction (DML (insert/update) can be in a transaction but DDL (create table, etc) cannot be).
+// If the migration will be run transactionally, it will run in the same transaction
+// as the callback that returned the string. If it runs non-transactionally, the
+// transaction that returned the string will be idle (hanging around) while the migration runs.
+// The choice of transactional vs non-transactional Can be overridden with
+// ForceNonTransactional() or ForceTransactional() options.
 func Generate(name string, generator func(context.Context, *sql.Tx) string, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
 	pm.genFn = func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, tx), nil }
@@ -152,22 +156,14 @@ func Generate(name string, generator func(context.Context, *sql.Tx) string, opts
 	return m
 }
 
-// GenerateE is the error-capable variant of Generate.
-func GenerateE(name string, generator func(context.Context, *sql.Tx) (string, error), opts ...libschema.MigrationOption) libschema.Migration {
-	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
-	pm.genFn = generator
-	m := libschema.Migration(pm)
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
-}
-
 type ConnPtr interface{ *sql.Tx | *sql.DB }
 
-// Computed defines a migration that runs arbitrary Go code. Supplying a *sql.DB
-// (Computed[*sql.DB]) makes it inherently non-transactional; using *sql.Tx keeps
-// it transactional.
+// Computed defines a migration that runs arbitrary Go code.
+// The signature of the action callback determines if the migration runs
+// transactionally or if it runs outside a transaction:
+//
+//	func(context.Context, *sql.Tx) error // run transactionlly
+//	func(context.Context, *sql.DB) error // run non-transactionally
 func Computed[T ConnPtr](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
 	var zero T

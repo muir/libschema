@@ -277,12 +277,12 @@ func SkipRemainingIf(pred func() (bool, error)) MigrationOption {
 	}
 }
 
-// ForceNonTransactional forces a migration (Script, Generate/GenerateE, or Computed) to run without
+// ForceNonTransactional forces a migration (Script, Generate, or Computed) to run without
 // a wrapping transaction. By using this you assert the migration is idempotent (safe to retry).
 // Overrides any automatic inference the driver would normally perform.
 //
 // Generate note: For drivers where generation always occurs inside a transaction context (e.g. Postgres
-// Generate/GenerateE with *sql.Tx generator) forcing non-transactional only affects execution of the
+// Generate with *sql.Tx generator) forcing non-transactional only affects execution of the
 // produced SQL, not the generator callback itself. Drivers will reject impossible combinations (e.g.
 // attempting to force non-transactional on a generator that fundamentally requires *sql.Tx if they cannot
 // safely downgrade).
@@ -297,7 +297,7 @@ func ForceNonTransactional() MigrationOption {
 // ForceTransactional forces a migration to run inside a transaction even if automatic inference
 // would choose non-transactional execution.
 //
-// Generate note: For generator-based migrations whose callback already receives *sql.Tx (Generate/GenerateE)
+// Generate note: For generator-based migrations whose callback already receives *sql.Tx (Generate)
 // this is effectively a no-op (they are already transactional). For generators that inherently execute
 // outside a transaction (none exist in current public API) forcing transactional would be rejected.
 //

@@ -71,8 +71,9 @@ func (m *pmigration) Base() *libschema.MigrationBase {
 	return &m.MigrationBase
 }
 
-// Script is a convenience helper for a literal SQL statement migration. It
-// automatically chooses transactional (*sql.Tx) or non-transactional (*sql.DB)
+// Script defines a literal SQL statement migration.
+// To run the migration, libschema automatically chooses transactional (*sql.Tx)
+// or non-transactional (*sql.DB)
 // execution based on Postgres rules for statements that cannot run inside a
 // transaction (e.g. CREATE INDEX CONCURRENTLY, VACUUM FULL, CREATE DATABASE).
 // The choice of transactional vs non-transactional Can be overridden with
@@ -86,13 +87,16 @@ func Script(name string, sqlText string, opts ...libschema.MigrationOption) libs
 	return m
 }
 
-// Generate defines a migration that produces SQL inside the real migration transaction.
-// It is always transactional. For non-transactional, use Script (auto-downgrade) or Computed[*sql.DB].
-// The generator callback runs in a transaction, but the migration may or may not
-// run in a transaction depending upon what it does and if ForceTransactional or ForceNonTransactional
-// is used.
-// Generate is the legacy form taking a generator that returns only a string.
-// Use GenerateE for error-capable generation.
+// Generate registers a callback that returns a migration in a string.
+// To run the migration, libschema automatically chooses transactional (*sql.Tx)
+// or non-transactional (*sql.DB)
+// execution based on Postgres rules for statements that cannot run inside a
+// transaction (e.g. CREATE INDEX CONCURRENTLY, VACUUM FULL, CREATE DATABASE).
+// If the migration will be run transactionally, it will run in the same transaction
+// as the callback that returned the string. If it runs non-transactionally, the
+// transaction that returned the string will be idle (hanging around) while the migration runs.
+// The choice of transactional vs non-transactional Can be overridden with
+// ForceNonTransactional() or ForceTransactional() options.
 func Generate(name string, generator func(context.Context, *sql.Tx) string, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, genFn: func(ctx context.Context, tx *sql.Tx) (string, error) { return generator(ctx, tx), nil }}
 	m := libschema.Migration(pm)
@@ -102,17 +106,12 @@ func Generate(name string, generator func(context.Context, *sql.Tx) string, opts
 	return m
 }
 
-// GenerateE is the error-capable variant of Generate.
-func GenerateE(name string, generator func(context.Context, *sql.Tx) (string, error), opts ...libschema.MigrationOption) libschema.Migration {
-	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, genFn: generator}
-	m := libschema.Migration(pm)
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
-}
-
 // Computed defines a migration that runs arbitrary Go code.
+// The signature of the action callback determines if the migration runs
+// transactionally or if it runs outside a transaction:
+//
+//	func(context.Context, *sql.Tx) error // run transactionlly
+//	func(context.Context, *sql.DB) error // run non-transactionally
 func Computed[T ConnPtr](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
 	// Detect which concrete generic type was requested by instantiating a zero value and
