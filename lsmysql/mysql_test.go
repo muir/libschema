@@ -7,11 +7,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lstesting"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 /*
@@ -30,6 +31,7 @@ mysql --protocol=tcp -P 3306 -u root --password=$PASSWORD --database=libschemate
 */
 
 func TestMysqlHappyPath(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
@@ -219,6 +221,7 @@ func testMysqlHappyPath(t *testing.T, dsn string, createPostfix string, driverNe
 }
 
 func TestMysqlNotAllowed(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")

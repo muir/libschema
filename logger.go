@@ -1,9 +1,9 @@
 package libschema
 
 import (
-	"github.com/muir/libschema/internal"
-
 	"github.com/muir/testinglogur"
+
+	"github.com/muir/libschema/internal"
 )
 
 type Logur interface {
@@ -29,7 +29,6 @@ func LogFromLogur(logur Logur) *internal.Log {
 //	import "log"
 //
 //	LogFromPrintln(log.Default())
-//
 func LogFromPrintln(printer interface{ Println(...interface{}) }) *internal.Log {
 	return LogFromLog(printlnToLog{printer})
 }

@@ -1,56 +1,38 @@
 package lsmysql
 
 import (
-	"fmt"
-	"regexp"
-	"strings"
-
+	"github.com/muir/libschema"
+	"github.com/muir/libschema/internal/stmtclass"
 	"github.com/muir/sqltoken"
-	"github.com/pkg/errors"
 )
 
 var (
-	// ErrDataAndDDL is returned when a migration combines DML and DDL
-	ErrDataAndDDL = errors.New("migration combines DDL (Data Definition Language [schema changes]) and data manipulation")
-
-	// ErrNonIdempotentDDL is returned when a migration has non-idempotent DDL
-	ErrNonIdempotentDDL = errors.New("unconditional migration has non-idempotent DDL (Data Definition Language [schema changes])")
-
-	ifExistsRE = regexp.MustCompile(`(?i)\bIF (?:NOT )?EXISTS\b`)
+	ErrDataAndDDL       = libschema.ErrDataAndDDL       // Deprecated: use libschema.ErrDataAndDDL
+	ErrNonIdempotentDDL = libschema.ErrNonIdempotentDDL // Deprecated: use libschema.ErrNonIdempotentDDL
 )
 
-// CheckScript attempts to validate that an SQL command does not do
-// both schema changes (DDL) and data changes.  The returned error
-// will be (when checked with errors.Is()) nil, ErrDataAndDDL, or
-// ErrNonIdempotentDDL.
+// Deprecated: no longer a supported API
 func CheckScript(s string) error {
-	var seenDDL string
-	var seenData string
-	var nonIdempotent string
 	ts := sqltoken.TokenizeMySQL(s)
-	for _, cmd := range ts.Strip().CmdSplit() {
-		word := strings.ToLower(cmd[0].Text)
-		switch word {
-		case "alter", "rename", "create", "drop", "comment":
-			seenDDL = cmd.String()
-			if !ifExistsRE.MatchString(cmd.String()) {
-				nonIdempotent = cmd.String()
+	stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, 0, ts)
+	sum := stmtclass.Summarize(stmts, agg)
+	if _, hasDDL := sum[stmtclass.IsDDL]; hasDDL && (agg&stmtclass.IsDML) != 0 {
+		var firstDDL, firstDML string
+		for _, st := range stmts {
+			if firstDDL == "" && st.Flags&stmtclass.IsDDL != 0 {
+				firstDDL = st.Text
 			}
-		case "truncate":
-			seenDDL = cmd.String()
-		case "use", "set":
-			// neither
-		case "values", "table", "select":
-			// doesn't modify anything
-		case "call", "delete", "do", "handler", "import", "insert", "load", "replace", "update", "with":
-			seenData = cmd.String()
+			if firstDML == "" && st.Flags&stmtclass.IsDML != 0 {
+				firstDML = st.Text
+			}
+			if firstDDL != "" && firstDML != "" {
+				break
+			}
 		}
+		return libschema.ErrDataAndDDL.Errorf("data command '%s' combined with DDL command '%s'", firstDML, firstDDL)
 	}
-	if seenDDL != "" && seenData != "" {
-		return fmt.Errorf("data command '%s' combined with DDL command '%s': %w", seenData, seenDDL, ErrDataAndDDL)
-	}
-	if nonIdempotent != "" {
-		return fmt.Errorf("non-idempotent DDL '%s': %w", nonIdempotent, ErrNonIdempotentDDL)
+	if first, hasNonIdem := sum[stmtclass.IsNonIdempotent]; hasNonIdem && (agg&stmtclass.IsDDL) != 0 {
+		return libschema.ErrNonIdempotentDDL.Errorf("non-idempotent DDL '%s'", first)
 	}
 	return nil
 }

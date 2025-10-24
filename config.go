@@ -51,5 +51,4 @@ type OverrideOptions struct {
 //	import "flag"
 //	import "github.com/muir/nfigure"
 //	nfigure.MustExportToFlagSet(flag.CommandLine, "flag", &libschema.DefautOverrides)
-//
 var DefaultOverrides OverrideOptions

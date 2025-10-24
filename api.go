@@ -4,9 +4,27 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/muir/libschema/internal"
+	"github.com/memsql/errors"
 
-	"github.com/pkg/errors"
+	"github.com/muir/libschema/internal"
+)
+
+const (
+	// ErrDataAndDDL indicates a single migration mixes schema changes (DDL) and data
+	// manipulation (DML) where that combination is disallowed.
+	ErrDataAndDDL errors.String = "migration combines DDL (schema changes) and data manipulation"
+
+	// ErrNonIdempotentDDL indicates a non-transactional migration contains easily
+	// guardable DDL lacking an IF (NOT) EXISTS clause.
+	ErrNonIdempotentDDL errors.String = "unconditional migration has non-idempotent DDL"
+
+	// ErrNonTxMultipleStatements indicates a non-transactional (idempotent) script migration
+	// attempted to execute multiple SQL statements when only one is allowed.
+	ErrNonTxMultipleStatements errors.String = "non-transactional migration has multiple statements"
+
+	// ErrNonIdempotentNonTx indicates a required-to-be-idempotent non-transactional migration
+	// failed idempotency validation heuristics.
+	ErrNonIdempotentNonTx errors.String = "non-idempotent non-transactional migration"
 )
 
 const DefaultTrackingTable = "libschema.migration_status"
@@ -46,14 +64,16 @@ type MigrationOption func(Migration)
 
 // Migration defines a single database defintion update.
 type MigrationBase struct {
-	Name            MigrationName
-	async           bool
-	rawAfter        []MigrationName
-	order           int // overall desired ordring across all libraries, ignores runAfter
-	status          MigrationStatus
-	skipIf          func() (bool, error)
-	skipRemainingIf func() (bool, error)
-	repeatUntilNoOp bool
+	Name             MigrationName
+	async            bool
+	rawAfter         []MigrationName
+	order            int // overall desired ordring across all libraries, ignores runAfter
+	status           MigrationStatus
+	skipIf           func() (bool, error)
+	skipRemainingIf  func() (bool, error)
+	repeatUntilNoOp  bool
+	nonTransactional bool  // set automatically or by ForceNonTransactional / inference
+	forcedTx         *bool // if not nil, explicitly chosen transactional mode (true=transactional, false=non-transactional)
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -190,16 +210,26 @@ func Asynchronous() MigrationOption {
 	}
 }
 
-// RepeatUntilNoOp marks a migration as potentially being needed to run multiple times.
-// It will run over and over until the database reports that the migration
-// modified no rows.  This can useuflly be combined with Asychnronous.
+// RepeatUntilNoOp marks a migration (Script or Generate) to be re-executed until
+// the underlying driver reports zero rows affected. Use it for single, pure DML
+// statements that progressively transform data (e.g. UPDATE batches that move a
+// limited subset each run). It is NOT a generic looping primitive.
 //
-// This marking only applies to Script() and Generated() migrations.  The migration
-// must be a single statement.
+// Safety / correctness guidelines:
+//   - Single statement only - multi-statement scripts can give a meaningless final RowsAffected().
+//   - DML only - avoid DDL (CREATE/ALTER/DROP/REFRESH) or utility commands; most return 0 and will
+//     terminate immediately or loop uselessly.
+//   - Idempotent per batch - repeating the same statement after partial success must not corrupt data.
+//   - Do NOT mix with non-transactional Postgres DDL (concurrent index builds, REFRESH MATERIALIZED VIEW CONCURRENTLY).
+//   - If logic needs conditionals or multiple statements, write a Computed migration and loop explicitly.
 //
-// For Computed() migrations, do not use RepeatUntilNoOp.  Instead simply write the
-// migration use Driver.DB() to get a database handle and use it to do many little
-// transactions, each one modifying a few rows until there is no more work to do.
+// Prefer a Computed migration when:
+//   - You need to run multiple statements per batch
+//   - You must inspect progress with custom queries
+//   - RowsAffected() is unreliable or driver-dependent
+//
+// Future note: libschema may emit debug warnings for obviously unreliable usages
+// (e.g. DDL + RepeatUntilNoOp). Treat the above bullets as normative behavior now.
 func RepeatUntilNoOp() MigrationOption {
 	return func(m Migration) {
 		m.Base().repeatUntilNoOp = true
@@ -247,6 +277,58 @@ func SkipRemainingIf(pred func() (bool, error)) MigrationOption {
 	}
 }
 
+// ForceNonTransactional forces a migration (Script, Generate, or Computed) to run without
+// a wrapping transaction. By using this you assert the migration is idempotent (safe to retry).
+// Overrides any automatic inference the driver would normally perform.
+//
+// Generate note: For drivers where generation always occurs inside a transaction context (e.g. Postgres
+// Generate with *sql.Tx generator) forcing non-transactional only affects execution of the
+// produced SQL, not the generator callback itself. Drivers will reject impossible combinations (e.g.
+// attempting to force non-transactional on a generator that fundamentally requires *sql.Tx if they cannot
+// safely downgrade).
+func ForceNonTransactional() MigrationOption {
+	return func(m Migration) {
+		b := m.Base()
+		v := false // false means non-transactional
+		b.forcedTx = &v
+	}
+}
+
+// ForceTransactional forces a migration to run inside a transaction even if automatic inference
+// would choose non-transactional execution.
+//
+// Generate note: For generator-based migrations whose callback already receives *sql.Tx (Generate)
+// this is effectively a no-op (they are already transactional). For generators that inherently execute
+// outside a transaction (none exist in current public API) forcing transactional would be rejected.
+//
+// WARNING (foot-gun): On MySQL / SingleStore this DOES NOT make DDL atomic. Those engines
+// autocommit each DDL statement regardless of any BEGIN you issue. By forcing transactional mode:
+//   - Earlier DML in the same migration may roll back while preceding DDL remains applied.
+//   - The bookkeeping UPDATE that records migration completion can fail while schema changes
+//     have already been partially or fully applied (leaving the migration marked incomplete and
+//     retried later against an already-changed schema).
+//   - Mixed DDL + DML ordering inside a forced transactional migration can produce inconsistent,
+//     misleading results during retries or partial failures.
+//
+// Use this only if you fully understand these semantics and prefer to retain a transactional wrapper
+// for non-DDL statements. If you simply need safe DDL, prefer writing idempotent statements and let
+// the driver downgrade automatically.
+func ForceTransactional() MigrationOption {
+	return func(m Migration) {
+		b := m.Base()
+		v := true // true means transactional
+		b.forcedTx = &v
+	}
+}
+
+// ApplyForceOverride overrides transactionality for any prior force call (ForceTransactional
+// or ForceNonTransactional)
+func (m *MigrationBase) ApplyForceOverride() {
+	if m.forcedTx != nil { // forced override present
+		m.SetNonTransactional(!*m.forcedTx)
+	}
+}
+
 func (d *Database) DB() *sql.DB {
 	return d.db
 }
@@ -289,6 +371,26 @@ func (m *MigrationBase) SetStatus(status MigrationStatus) {
 func (m *MigrationBase) HasSkipIf() bool {
 	return m.skipIf != nil
 }
+
+// NonTransactional reports if the migration must not be wrapped in a transaction.
+// This is automatically set for drivers (e.g. Postgres) that provide generic
+// migration helpers which infer non-transactional status from the connection
+// type used (e.g. *sql.DB vs *sql.Tx). A migration marked nonTransactional will
+// be executed without an encompassing BEGIN/COMMIT; status recording still
+// occurs within its own small transaction when supported.
+func (m *MigrationBase) NonTransactional() bool {
+	return m.nonTransactional
+}
+
+func (m *MigrationBase) SetNonTransactional(v bool) {
+	m.nonTransactional = v
+}
+
+// ForcedTransactional reports if ForceTransactional() was explicitly called.
+func (m *MigrationBase) ForcedTransactional() bool { return m.forcedTx != nil && *m.forcedTx }
+
+// ForcedNonTransactional reports if ForceNonTransactional() was explicitly called.
+func (m *MigrationBase) ForcedNonTransactional() bool { return m.forcedTx != nil && !*m.forcedTx }
 
 func (n MigrationName) String() string {
 	return n.Library + ": " + n.Name

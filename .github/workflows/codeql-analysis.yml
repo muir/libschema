@@ -64,10 +64,10 @@ jobs:
     - name: Autobuild
       uses: github/codeql-action/autobuild@16140ae1a102900babc80a33c44059580f687047
 
-    # ℹ️ Command-line programs to run using the OS shell.
-    # 📚 https://git.io/JvXDl
+  # Info: Command-line programs to run using the OS shell.
+  # Docs: https://git.io/JvXDl
 
-    # ✏️ If the Autobuild fails above, remove it and uncomment the following three lines
+  # If the Autobuild fails above, remove it and uncomment the following three lines
     #    and modify them (or add more) to build your code if your project
     #    uses a compiled language
 

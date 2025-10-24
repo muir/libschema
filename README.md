@@ -149,6 +149,28 @@ complete.  If the migration is revised, then the later parts can
 be re-tried as long as the earlier parts are not modified.  This
 does not apply to `Compute()`ed migrations.
 
+### PostgreSQL non-transactional (idempotent) DDL
+
+Some PostgreSQL statements (e.g. `CREATE INDEX CONCURRENTLY`, `DROP
+INDEX CONCURRENTLY`, `REFRESH MATERIALIZED VIEW CONCURRENTLY`)
+cannot run inside an explicit transaction block. Libschema auto-detects
+common patterns in `Script(...)` and will execute those outside a
+transaction; you can also opt in explicitly by using a generic type
+that is *not* a `*sql.Tx` (e.g. `Generate[*sql.DB]`). Non-transactional
+migrations must be idempotent: safe to retry after partial failure.
+A fuller rationale, supported patterns, and enum/value guidance
+live in `lspostgres/NON_TRANSACTIONAL.md`.
+
+### RepeatUntilNoOp (brief)
+
+`RepeatUntilNoOp()` re-runs a single DML statement until
+`RowsAffected()==0`. Use only for pure data updates where the driver
+reports accurate counts. Avoid DDL, guarded `CREATE ... IF NOT
+EXISTS`, concurrent index / materialized view commands, or
+multi-statement scripts. For anything more complex, prefer a
+`Computed` migration and loop explicitly. See the Go doc comment
+on `RepeatUntilNoOp` for detailed guidance.
+
 ## Command line
 
 The `OverrideOptions` can be added as command line flags that 
@@ -291,9 +313,11 @@ will be clearly documented and will fail in a way that does not cause hidden pro
 For example, switching from using "flag" to using OverrideOptions will trigger
 an obvious breakage if you try to use a flag that no longer works.
 
-Anticpated changes for the future:
+Anticipated changes:
 
 - API tweaks
 - Support for additional databases
 - Support for additional logging APIs
 - Support for tracing spans (per migration)
+
+

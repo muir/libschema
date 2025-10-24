@@ -6,15 +6,16 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/lsmysql"
 	"github.com/muir/libschema/lstesting"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRepeat(t *testing.T) {
+	t.Parallel()
 	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
