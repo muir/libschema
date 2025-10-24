@@ -68,5 +68,8 @@ func (f *Finalizer[DB, TX]) Run() (finalErr error) {
 	}
 
 	saveErr = f.CommitTx(tx)
+	if saveErr == nil {
+		tx = nil // prevents call to Rollback
+	}
 	return finalErr
 }
