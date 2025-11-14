@@ -8,8 +8,6 @@ import (
 	"github.com/muir/sqltoken"
 )
 
-// TODO(classifysql): remove internal/stmtclass and use this class instead
-
 // Dialect enumerates supported SQL dialects.
 type Dialect int
 
@@ -45,9 +43,13 @@ var flagsInOrder = []Flag{IsDDL, IsDML, IsNonIdempotent, IsEasilyIdempotentFix, 
 
 // Statement represents one SQL statement with its original, unstripped tokens and classification flags.
 type Statement struct {
-	Flags   Flag
-	Tokens  sqltoken.Tokens // unstripped tokens for this statement
-	dialect Dialect
+	Flags          Flag
+	Tokens         sqltoken.Tokens // unstripped tokens for this statement
+	dialect        Dialect
+	version        int
+	stripped       sqltoken.Tokens // cached stripped tokens (nil/empty if none)
+	strippedString string          // cached stripped string (empty if none), lower case
+	firstLower     string          // cached lowercase first token text (empty if none)
 }
 
 // Statements is a slice of Statement.
@@ -55,7 +57,6 @@ type Statements []Statement
 
 // Postgres statements that inherently require execution outside a transaction.
 // Lower-cased, whitespace-collapsed prefixes.
-// TODO(classifysql): remove pgMustNonTxPrefixes from internal/stmtclass once migrated.
 var pgMustNonTxPrefixes = []string{
 	"create index concurrently",
 	"create unique index concurrently",
@@ -103,15 +104,19 @@ func ClassifyTokens(d Dialect, majorVersion int, sqlString string) (Statements, 
 	for i, raw := range split {
 		stmts[i].Tokens = raw
 		stmts[i].dialect = d
+		stmts[i].version = majorVersion
 		stripped := raw.Strip()
+		stmts[i].stripped = stripped
 		if len(stripped) == 0 {
 			// just comments/whitespace
 			continue
 		}
-		stmts[i].Flags = classifyFirstVerb(d, majorVersion, stripped)
+		stmts[i].strippedString = strings.ToLower(stripped.String())
+		stmts[i].firstLower = strings.ToLower(stripped[0].Text)
+		stmts[i].classify()
 	}
 	// Add IsMultipleStatements if there are multiple real statements
-	if stmts.countNonEmpty() > 1 {
+	if stmts.CountNonEmpty() > 1 {
 		for i := range stmts {
 			stmts[i].Flags |= IsMultipleStatements
 		}
@@ -119,27 +124,82 @@ func ClassifyTokens(d Dialect, majorVersion int, sqlString string) (Statements, 
 	return stmts, nil
 }
 
-// classifyFirstVerb applies verb-based classification logic (copied from stmtclass with minimal adaptation).
-func classifyFirstVerb(d Dialect, majorVersion int, stripped sqltoken.Tokens) Flag {
-	first := strings.ToLower(stripped[0].Text)
-	txt := stripped.String()
-	var f Flag
-	switch first {
+// StripString returns the lowercased stripped string
+func (s Statement) StripString() string { return s.strippedString }
+
+// FirstWord returns the lower case first word
+func (s Statement) FirstWord() string { return s.firstLower }
+
+func (s Statement) Strip() sqltoken.Tokens { return s.stripped }
+
+// classifyFirstVerb applies verb-based classification logic
+func (s *Statement) classify() {
+	switch s.firstLower {
 	case "create":
-		f = classifyCreate(d, txt)
+		s.Flags = s.classifyCreate()
 	case "alter":
-		f = classifyAlter(d, txt)
+		s.Flags = s.classifyAlter()
 	case "drop":
-		f = classifyDrop(d, txt)
+		s.Flags = s.classifyDrop()
 	case "rename", "comment":
-		f = IsDDL | IsNonIdempotent
+		s.Flags = IsDDL | IsNonIdempotent
 	case "truncate":
-		f = IsDDL
+		s.Flags = IsDDL
 	case "insert", "update", "delete", "replace", "call", "do", "load", "handler", "import", "with":
-		f = IsDML
+		s.Flags = IsDML
 	}
-	if d == DialectPostgres && isPostgresMustNonTxVersion(txt, majorVersion) {
-		f |= IsMustNonTx
+	if s.dialect == DialectPostgres && isPostgresMustNonTxVersion(s.strippedString, s.version) {
+		s.Flags |= IsMustNonTx
+	}
+}
+
+func (s Statement) classifyCreate() Flag {
+	f := IsDDL
+	list := mysqlCreateEasy
+	if s.dialect == DialectPostgres {
+		list = pgCreateEasy
+	}
+	for _, p := range list {
+		if strings.HasPrefix(s.strippedString, p) {
+			if !ifExistsRE.MatchString(s.strippedString) {
+				f |= IsNonIdempotent | IsEasilyIdempotentFix
+			}
+			return f
+		}
+	}
+	if !ifExistsRE.MatchString(s.strippedString) { // generic CREATE without IF EXISTS
+		f |= IsNonIdempotent
+	}
+	return f
+}
+
+func (s Statement) classifyAlter() Flag {
+	f := IsDDL
+	if ifExistsRE.MatchString(s.strippedString) {
+		return f
+	}
+	f |= IsNonIdempotent
+	if s.dialect == DialectPostgres && strings.Contains(s.strippedString, " add column") {
+		f |= IsEasilyIdempotentFix
+	}
+	return f
+}
+
+func (s Statement) classifyDrop() Flag {
+	f := IsDDL
+	if ifExistsRE.MatchString(s.strippedString) {
+		return f
+	}
+	f |= IsNonIdempotent
+	list := mysqlDropEasy
+	if s.dialect == DialectPostgres {
+		list = pgDropEasy
+	}
+	for _, p := range list {
+		if strings.HasPrefix(s.strippedString, p) {
+			f |= IsEasilyIdempotentFix
+			break
+		}
 	}
 	return f
 }
@@ -188,7 +248,7 @@ func (s Statements) Regroup() []Statements {
 	flush()
 	// Clear Multi flag from any isolated single-statement group; keep in groups with >1 real statements.
 	for gi, g := range groups {
-		if g.countNonEmpty() == 1 {
+		if g.CountNonEmpty() == 1 {
 			// isolated
 			for si := range g {
 				g[si].Flags &^= IsMultipleStatements
@@ -199,15 +259,38 @@ func (s Statements) Regroup() []Statements {
 	return groups
 }
 
-func (s Statements) countNonEmpty() int {
+// CountNonEmpty returns the number of real statements, excluding empty/comment-only and SET-leading statements.
+func (s Statements) CountNonEmpty() int {
 	nonEmpty := 0
 	for _, st := range s {
-		if len(st.Tokens.Strip()) == 0 {
+		stripped := st.Tokens.Strip()
+		if len(stripped) == 0 {
+			continue
+		}
+		// Exclude SET statements from non-empty counting
+		first := strings.ToLower(stripped[0].Text)
+		if first == "set" {
 			continue
 		}
 		nonEmpty++
 	}
 	return nonEmpty
+}
+
+// FirstReal returns a pointer to the first real statement (non-empty, non-SET) or nil if none.
+func (s Statements) FirstReal() *Statement {
+	for i := range s {
+		stripped := s[i].Tokens.Strip()
+		if len(stripped) == 0 {
+			continue
+		}
+		first := strings.ToLower(stripped[0].Text)
+		if first == "set" {
+			continue
+		}
+		return &s[i]
+	}
+	return nil
 }
 
 func (s Statements) TokensList() sqltoken.TokensList {
@@ -221,6 +304,15 @@ func (s Statements) TokensList() sqltoken.TokensList {
 
 // Summary maps each flag to the first statement Tokens that exhibited it. IsMultipleStatements is synthetic.
 type Summary map[Flag]sqltoken.Tokens
+
+func (s Summary) Includes(flags ...Flag) bool {
+	for _, flag := range flags {
+		if _, ok := s[flag]; !ok {
+			return false
+		}
+	}
+	return true
+}
 
 // Summarize builds a Summary from the classified statements.
 func (s Statements) Summarize() Summary {
@@ -249,7 +341,6 @@ func (f Flag) Names() []string {
 }
 
 // isPostgresMustNonTxVersion returns true when a statement must execute outside a transaction for the specified major version.
-// TODO(classifysql): remove duplicate from internal/stmtclass.
 func isPostgresMustNonTxVersion(txt string, major int) bool {
 	norm := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(txt))), " ")
 	if major > 0 && major < 12 && strings.HasPrefix(norm, "alter type") && strings.Contains(norm, " add value") {
@@ -264,57 +355,3 @@ func isPostgresMustNonTxVersion(txt string, major int) bool {
 }
 
 var ifExistsRE = regexp.MustCompile(`(?i)\bIF\s+(?:NOT\s+)?EXISTS\b`)
-
-func classifyCreate(d Dialect, txt string) Flag {
-	f := IsDDL
-	low := strings.ToLower(strings.TrimSpace(txt))
-	list := mysqlCreateEasy
-	if d == DialectPostgres {
-		list = pgCreateEasy
-	}
-	for _, p := range list {
-		if strings.HasPrefix(low, p) {
-			if !ifExistsRE.MatchString(low) {
-				f |= IsNonIdempotent | IsEasilyIdempotentFix
-			}
-			return f
-		}
-	}
-	if !ifExistsRE.MatchString(low) { // generic CREATE without IF EXISTS
-		f |= IsNonIdempotent
-	}
-	return f
-}
-
-func classifyAlter(d Dialect, txt string) Flag {
-	f := IsDDL
-	low := strings.ToLower(strings.TrimSpace(txt))
-	if ifExistsRE.MatchString(low) {
-		return f
-	}
-	f |= IsNonIdempotent
-	if d == DialectPostgres && strings.Contains(low, " add column") {
-		f |= IsEasilyIdempotentFix
-	}
-	return f
-}
-
-func classifyDrop(d Dialect, txt string) Flag {
-	f := IsDDL
-	low := strings.ToLower(strings.TrimSpace(txt))
-	if ifExistsRE.MatchString(low) {
-		return f
-	}
-	f |= IsNonIdempotent
-	list := mysqlDropEasy
-	if d == DialectPostgres {
-		list = pgDropEasy
-	}
-	for _, p := range list {
-		if strings.HasPrefix(low, p) {
-			f |= IsEasilyIdempotentFix
-			break
-		}
-	}
-	return f
-}

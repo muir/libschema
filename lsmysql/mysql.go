@@ -10,12 +10,11 @@ import (
 	"sync"
 
 	"github.com/memsql/errors"
-	"github.com/muir/sqltoken"
 
 	"github.com/muir/libschema"
+	"github.com/muir/libschema/classifysql"
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/internal/migfinalize"
-	"github.com/muir/libschema/internal/stmtclass"
 )
 
 // MySQL is a libschema.Driver for connecting to MySQL-like databases that
@@ -244,10 +243,14 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 			if sqlText == "" {
 				return nil
 			}
-			toks := sqltoken.TokenizeMySQL(sqlText)
-			stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, 0, toks)
-			if agg&stmtclass.IsDDL != 0 {
-				if agg&stmtclass.IsDML != 0 {
+			cstmts, err := classifysql.ClassifyTokens(classifysql.DialectMySQL, 0, sqlText)
+			if err != nil {
+				return errors.Wrap(err, "classify mysql migration")
+			}
+
+			summary := cstmts.Summarize()
+			if summary.Includes(classifysql.IsDDL) {
+				if summary.Includes(classifysql.IsDML) {
 					return errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
 				}
 				if m.Base().ForcedTransactional() {
@@ -256,12 +259,14 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				if !m.Base().NonTransactional() {
 					pm.SetNonTransactional(true)
 				}
-				for _, st := range stmts {
-					if st.Flags&(stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) == (stmtclass.IsEasilyIdempotentFix|stmtclass.IsNonIdempotent) && !m.Base().HasSkipIf() {
-						return errors.Errorf("non-idempotent DDL '%s': %w", st.Text, libschema.ErrNonIdempotentDDL)
+				for _, st := range cstmts {
+					if st.Flags&(classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) == (classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) && !m.Base().HasSkipIf() {
+						text := st.Tokens.Strip().String()
+						return errors.Errorf("non-idempotent DDL '%s': %w", text, libschema.ErrNonIdempotentDDL)
 					}
 				}
 			}
+
 			if !m.Base().NonTransactional() {
 				execRes, execErr := tx.ExecContext(ctx, sqlText)
 				if execErr != nil {

@@ -2,8 +2,7 @@ package lsmysql
 
 import (
 	"github.com/muir/libschema"
-	"github.com/muir/libschema/internal/stmtclass"
-	"github.com/muir/sqltoken"
+	"github.com/muir/libschema/classifysql"
 )
 
 var (
@@ -13,26 +12,21 @@ var (
 
 // Deprecated: no longer a supported API
 func CheckScript(s string) error {
-	ts := sqltoken.TokenizeMySQL(s)
-	stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectMySQL, 0, ts)
-	sum := stmtclass.Summarize(stmts, agg)
-	if _, hasDDL := sum[stmtclass.IsDDL]; hasDDL && (agg&stmtclass.IsDML) != 0 {
-		var firstDDL, firstDML string
-		for _, st := range stmts {
-			if firstDDL == "" && st.Flags&stmtclass.IsDDL != 0 {
-				firstDDL = st.Text
-			}
-			if firstDML == "" && st.Flags&stmtclass.IsDML != 0 {
-				firstDML = st.Text
-			}
-			if firstDDL != "" && firstDML != "" {
-				break
-			}
-		}
-		return libschema.ErrDataAndDDL.Errorf("data command '%s' combined with DDL command '%s'", firstDML, firstDDL)
+	stmts, err := classifysql.ClassifyTokens(classifysql.DialectMySQL, 0, s)
+	if err != nil {
+		return err
 	}
-	if first, hasNonIdem := sum[stmtclass.IsNonIdempotent]; hasNonIdem && (agg&stmtclass.IsDDL) != 0 {
-		return libschema.ErrNonIdempotentDDL.Errorf("non-idempotent DDL '%s'", first)
+	// Build aggregate and summary using new API
+	var agg classifysql.Flag
+	for _, st := range stmts {
+		agg |= st.Flags
+	}
+	sum := stmts.Summarize()
+	if sum.Includes(classifysql.IsDDL, classifysql.IsDML) {
+		return libschema.ErrDataAndDDL.Errorf("data command '%s' combined with DDL command '%s'", sum[classifysql.IsDML].String(), sum[classifysql.IsDDL].String())
+	}
+	if sum.Includes(classifysql.IsNonIdempotent, classifysql.IsDDL) {
+		return libschema.ErrNonIdempotentDDL.Errorf("non-idempotent DDL '%s'", sum[classifysql.IsNonIdempotent].String())
 	}
 	return nil
 }
