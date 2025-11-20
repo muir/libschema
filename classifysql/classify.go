@@ -12,7 +12,8 @@ import (
 type Dialect int
 
 const (
-	DialectMySQL Dialect = iota
+	DialectInvalid Dialect = iota
+	DialectMySQL
 	DialectPostgres
 	DialectSingleStore = DialectMySQL
 )
