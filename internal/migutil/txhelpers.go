@@ -6,7 +6,7 @@ import (
 	"github.com/memsql/errors"
 
 	"github.com/muir/libschema"
-	"github.com/muir/libschema/internal/stmtclass"
+	"github.com/muir/libschema/classifysql"
 )
 
 // CheckNonIdempotentDDLFix validates DDL idempotency requirements. For any statement flagged as
@@ -15,23 +15,24 @@ import (
 func CheckNonIdempotentDDLFix(
 	migName string,
 	hasSkipIf bool,
-	stmts []stmtclass.StatementFlags,
+	stmts []classifysql.Statement,
 ) error {
 	for _, st := range stmts {
 		flags := st.Flags
-		if flags&stmtclass.IsDDL == 0 {
+		if flags&classifysql.IsDDL == 0 {
 			continue
 		}
-		if flags&stmtclass.IsNonIdempotent == 0 {
+		if flags&classifysql.IsNonIdempotent == 0 {
 			continue
 		}
 		if hasSkipIf { // tolerated under SkipIf contract
 			continue
 		}
-		if flags&stmtclass.IsEasilyIdempotentFix != 0 {
-			return errors.Wrapf(libschema.ErrNonIdempotentDDL, "non-idempotent DDL missing IF [NOT] EXISTS in migration %s: %s", migName, strings.TrimSpace(st.Text))
+		text := strings.TrimSpace(st.Tokens.Strip().String())
+		if flags&classifysql.IsEasilyIdempotentFix != 0 {
+			return errors.Wrapf(libschema.ErrNonIdempotentDDL, "non-idempotent DDL missing IF [NOT] EXISTS in migration %s: %s", migName, text)
 		}
-		return errors.Wrapf(libschema.ErrNonIdempotentDDL, "non-idempotent DDL in migration %s: %s", migName, strings.TrimSpace(st.Text))
+		return errors.Wrapf(libschema.ErrNonIdempotentDDL, "non-idempotent DDL in migration %s: %s", migName, text)
 	}
 	return nil
 }

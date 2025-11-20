@@ -12,12 +12,11 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/memsql/errors"
-	"github.com/muir/sqltoken"
 
 	"github.com/muir/libschema"
+	"github.com/muir/libschema/classifysql"
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/internal/migfinalize"
-	"github.com/muir/libschema/internal/stmtclass"
 )
 
 // Postgres is a libschema.Driver for connecting to Postgres-like databases that
@@ -138,7 +137,6 @@ func Computed[T ConnPtr](name string, action func(context.Context, T) error, opt
 func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (result sql.Result, _ error) {
 	pm := m.(*pmigration)
 
-	// Initialize stmtclass version pruning once.
 	if p.serverMajor == 0 {
 		if maj, min := p.ServerVersion(ctx, d.DB()); maj != 0 {
 			p.serverMajor, p.serverMinor = maj, min
@@ -203,13 +201,15 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 			if scriptSQL == "" {
 				return nil
 			}
-			// Unified classification & downgrade via stmtclass
-			ts := sqltoken.TokenizePostgreSQL(scriptSQL)
-			stmts, agg := stmtclass.ClassifyTokens(stmtclass.DialectPostgres, p.serverMajor, ts)
+			// Classification & downgrade via classifysql
+			cstmts, err := classifysql.ClassifyTokens(classifysql.DialectPostgres, p.serverMajor, scriptSQL)
+			if err != nil {
+				return errors.Wrap(err, "classify postgres migration")
+			}
 			if !pm.Base().ForcedTransactional() && !pm.Base().NonTransactional() {
 				mustNonTx := false
-				for _, st := range stmts {
-					if (st.Flags & stmtclass.IsMustNonTx) != 0 {
+				for _, st := range cstmts {
+					if st.Flags&classifysql.IsMustNonTx != 0 {
 						mustNonTx = true
 						break
 					}
@@ -224,25 +224,25 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				return errors.Wrapf(err, "ran %s in a transaction", scriptSQL)
 			}
 			// Non-transactional validation (final mode is non-tx)
-			// Apply schema override (search_path) for non-transactional execution if needed.
 			if d.Options.SchemaOverride != "" {
 				if _, err := d.DB().ExecContext(ctx, "SET search_path TO "+pq.QuoteIdentifier(d.Options.SchemaOverride)); err != nil {
 					return errors.Wrapf(err, "set search_path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
 				}
 			}
-			if agg&stmtclass.IsMultipleStatements != 0 || len(stmts) != 1 {
+			// Expect exactly one non-empty real statement (CountNonEmpty excludes SET)
+			if cstmts.CountNonEmpty() != 1 {
 				return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement", m.Base().Name)
 			}
-			st := stmts[0]
-			if st.Flags&stmtclass.IsNonIdempotent != 0 && !m.Base().HasSkipIf() {
-				if st.Flags&stmtclass.IsEasilyIdempotentFix != 0 {
-					return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent statement missing IF [NOT] EXISTS: %s", m.Base().Name, strings.TrimSpace(st.Text))
+			firstReal := cstmts.FirstReal()
+			if firstReal.Flags&classifysql.IsNonIdempotent != 0 && !m.Base().HasSkipIf() {
+				if firstReal.Flags&classifysql.IsEasilyIdempotentFix != 0 {
+					return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent statement missing IF [NOT] EXISTS: %s", m.Base().Name, firstReal.StripString())
 				}
-				return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent: %s", m.Base().Name, strings.TrimSpace(st.Text))
+				return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent: %s", m.Base().Name, firstReal.StripString())
 			}
-			var err error
-			result, err = d.DB().ExecContext(ctx, scriptSQL)
-			return errors.Wrap(err, scriptSQL)
+			var execErr error
+			result, execErr = d.DB().ExecContext(ctx, scriptSQL)
+			return errors.Wrap(execErr, scriptSQL)
 		},
 		SaveStatus: func(ctx context.Context, tx *sql.Tx, migErr error) error {
 			return errors.WithStack(p.saveStatus(log, tx, d, m, migErr == nil, migErr))

@@ -1,9 +1,8 @@
-package stmtclass
+package classifysql
 
 import (
 	"testing"
 
-	"github.com/muir/sqltoken"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,8 +20,8 @@ func TestEasilyIdempotentFixFlag(t *testing.T) {
 		{"alter table add col", "ALTER TABLE t1 ADD COLUMN c2 int", false, true},
 	}
 	for _, c := range cases {
-		toks := sqltoken.TokenizeMySQL(c.sql)
-		stmts, _ := ClassifyTokens(DialectMySQL, 0, toks)
+		stmts, err := ClassifyTokens(DialectMySQL, 0, c.sql)
+		require.NoError(t, err, c.name)
 		require.Len(t, stmts, 1, c.name)
 		got := stmts[0].Flags
 		assert.Equalf(t, c.wantEasy, got&IsEasilyIdempotentFix != 0, "%s: easy-fix flag mismatch", c.name)
