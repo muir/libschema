@@ -7,7 +7,7 @@ toolchain go1.24.2
 require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/lib/pq v1.10.9
+	github.com/lib/pq v1.11.1
 	github.com/memsql/errors v0.2.0
 	github.com/muir/sqltoken v0.2.0
 	github.com/muir/testinglogur v0.0.1
