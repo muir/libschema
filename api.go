@@ -74,6 +74,7 @@ type MigrationBase struct {
 	repeatUntilNoOp  bool
 	nonTransactional bool  // set automatically or by ForceNonTransactional / inference
 	forcedTx         *bool // if not nil, explicitly chosen transactional mode (true=transactional, false=non-transactional)
+	notes            map[string]any
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -81,6 +82,13 @@ func (m MigrationBase) Copy() MigrationBase {
 		ra := make([]MigrationName, len(m.rawAfter))
 		copy(ra, m.rawAfter)
 		m.rawAfter = ra
+	}
+	if m.notes != nil {
+		c := make(map[string]any, len(m.notes))
+		for k, v := range m.notes {
+			c[k] = v
+		}
+		m.notes = c
 	}
 	return m
 }
@@ -372,6 +380,17 @@ func (m *MigrationBase) SetStatus(status MigrationStatus) {
 
 func (m *MigrationBase) HasSkipIf() bool {
 	return m.skipIf != nil
+}
+
+func (m *MigrationBase) SetNote(key string, value any) {
+	if m.notes == nil {
+		m.notes = make(map[string]any)
+	}
+	m.notes[key] = value
+}
+
+func (m *MigrationBase) Notes() map[string]any {
+	return m.notes
 }
 
 // NonTransactional reports if the migration must not be wrapped in a transaction.
