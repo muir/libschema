@@ -205,6 +205,9 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 		}
 		var stop bool
 		stop, err = d.doOneMigration(ctx, m)
+		if err != nil {
+			d.reportSequenceError(d.sequence[0:i+1], err, "sychronous")
+		}
 		if err != nil || stop {
 			return err
 		}
@@ -212,6 +215,26 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 	return nil
 }
 
+func (d *Database) reportSequenceError(migrations []Migration, err error, syncOrAsync string) {
+	// report migrations that succeeded
+	if len(migrations) > 1 {
+		d.log.Info("migrations succeeded before eventual failre", map[string]any{
+			"number_succeeded": len(migrations) - 1,
+		})
+		for i := 0; i < len(migrations)-1; i++ {
+			m := migrations[i].Base()
+			d.log.Info("migration success", map[string]any{
+				"name":            string(m.Name.Name),
+				"library":         string(m.Name.Library),
+				"sequence_number": i + 1,
+			},
+				m.Notes(),
+			)
+		}
+	}
+}
+
+// doOneMigration returns true if migrations should stop
 func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error) {
 	if d.Options.DebugLogging {
 		d.log.Debug("Starting migration", map[string]interface{}{
@@ -221,9 +244,12 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 		})
 	}
 	if err := d.driver.IsMigrationSupported(d, d.log, m); err != nil {
-		d.log.Debug(" migration not supported", map[string]interface{}{
+		d.log.Debug(" migration not supported", map[string]any{
 			"error": err.Error(),
 		})
+		m.Base().SetNote("applied", false)
+		m.Base().SetNote("reason", "not supported")
+		m.Base().SetNote("error", err)
 		return false, err
 	}
 	if m.Base().skipIf != nil {
@@ -233,6 +259,8 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 		}
 		if skip {
 			d.log.Debug(" skipping migration")
+			m.Base().SetNote("applied", false)
+			m.Base().SetNote("reason", "skipped with SkipIf")
 			return false, nil
 		}
 		d.log.Debug(" not skipping migration")
@@ -244,28 +272,42 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 		}
 		if skip {
 			d.log.Debug(" skipping remaining migrations")
+			m.Base().SetNote("applied", false)
+			m.Base().SetNote("reason", "skipped with SkipRemainingIf")
 			return true, nil
 		}
 		d.log.Debug(" not skipping remaining migrations")
 	}
 	var repeatCount int
+	var totalRowsModified int64
 	for {
 		result, err := d.driver.DoOneMigration(ctx, d.log, d, m)
-		if err != nil && d.Options.OnMigrationFailure != nil {
-			d.log.Debug(" migration failed", map[string]interface{}{
-				"error": err.Error(),
-			})
-			d.Options.OnMigrationFailure(d, m.Base().Name, err)
+		if err != nil {
+			if d.Options.OnMigrationFailure != nil {
+				d.log.Debug(" migration failed", map[string]interface{}{
+					"error": err.Error(),
+				})
+				d.Options.OnMigrationFailure(d, m.Base().Name, err)
+			}
+			m.Base().SetNote("applied", false)
+			m.Base().SetNote("reason", "tried and failed")
+			m.Base().SetNote("error", err)
 		}
 		if m.Base().repeatUntilNoOp && err == nil && result != nil {
 			ra, err := result.RowsAffected()
 			if err != nil {
+				m.Base().SetNote("applied", false)
+				m.Base().SetNote("reason", "tried, fetching rows affected failed")
+				m.Base().SetNote("error", errors.WithStack(err))
 				return false, err
 			}
+			totalRowsModified += ra
+			m.Base().SetNote("rows_modified", totalRowsModified)
 			if ra == 0 {
 				return false, nil
 			}
 			repeatCount++
+			m.Base().SetNote("repeat_count", repeatCount)
 			d.log.Info("migration modified rows, repeating", map[string]interface{}{
 				"repeatCount":  repeatCount,
 				"rowsModified": ra,
@@ -324,12 +366,16 @@ func (d *Database) asyncMigrate(ctx context.Context) {
 		d.allDone(m, err)
 		d.log.Info("Done with async migrations")
 	}()
-	for _, m = range d.sequence {
+	var i int
+	for i, m = range d.sequence {
 		if m.Base().Status().Done {
 			continue
 		}
 		var stop bool
 		stop, err = d.doOneMigration(ctx, m)
+		if err != nil {
+			d.reportSequenceError(d.sequence[0:i+1], err, "async")
+		}
 		if err != nil || stop {
 			return
 		}

@@ -198,6 +198,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				scriptSQL = sqlText
 			}
 			scriptSQL = strings.TrimSpace(scriptSQL)
+			m.Base().SetNote("sql", scriptSQL)
 			if scriptSQL == "" {
 				return nil
 			}

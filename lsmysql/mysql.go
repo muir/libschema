@@ -240,6 +240,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				sqlText = genSQL
 			}
 			sqlText = strings.TrimSpace(sqlText)
+			m.Base().SetNote("sql", sqlText)
 			if sqlText == "" {
 				return nil
 			}
