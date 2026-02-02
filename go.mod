@@ -9,7 +9,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/lib/pq v1.11.1
 	github.com/memsql/errors v0.2.0
-	github.com/muir/sqltoken v0.2.0
+	github.com/muir/sqltoken v0.2.1
 	github.com/muir/testinglogur v0.0.1
 	github.com/stretchr/testify v1.11.1
 )
