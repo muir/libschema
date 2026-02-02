@@ -350,6 +350,8 @@ func (d *Database) Lookup(name MigrationName) (Migration, bool) {
 // migration is dependent upon the prior migration and they'll run in the order
 // given.  By default, all the migrations for a library will run in the order in
 // which the library migrations are defined.
+//
+// Migrations for a specific library are not additive. All must be given at once.
 func (d *Database) Migrations(libraryName string, migrations ...Migration) {
 	if _, ok := d.byLibrary[libraryName]; ok {
 		d.errors = append(d.errors, errors.Errorf("duplicate library '%s' registered with a call to Database.Migrations()", libraryName))
