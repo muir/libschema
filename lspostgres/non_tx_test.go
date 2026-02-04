@@ -3,7 +3,9 @@ package lspostgres_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +15,44 @@ import (
 	"github.com/muir/libschema/lspostgres"
 	"github.com/muir/libschema/lstesting"
 )
+
+type logEntry struct {
+	msg    string
+	fields []map[string]interface{}
+}
+
+type captureLog struct {
+	t       *testing.T
+	mu      sync.Mutex
+	entries []logEntry
+}
+
+func (l *captureLog) Trace(msg string, fields ...map[string]interface{}) { l.add(msg, fields) }
+func (l *captureLog) Debug(msg string, fields ...map[string]interface{}) { l.add(msg, fields) }
+func (l *captureLog) Info(msg string, fields ...map[string]interface{})  { l.add(msg, fields) }
+func (l *captureLog) Warn(msg string, fields ...map[string]interface{})  { l.add(msg, fields) }
+func (l *captureLog) Error(msg string, fields ...map[string]interface{}) { l.add(msg, fields) }
+
+func (l *captureLog) add(msg string, fields []map[string]interface{}) {
+	combined := msg
+	for _, m := range fields {
+		for k, v := range m {
+			combined += " " + k + "=" + fmt.Sprint(v)
+		}
+	}
+	l.t.Log("captured", combined)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = append(l.entries, logEntry{msg: msg, fields: fields})
+}
+
+func (l *captureLog) Entries() []logEntry {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	entries := make([]logEntry, len(l.entries))
+	copy(entries, l.entries)
+	return entries
+}
 
 func openPGNonTx(t *testing.T) *sql.DB {
 	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
@@ -33,6 +73,7 @@ func TestPostgresNonTxCases(t *testing.T) {
 		expectErr   bool
 		errContains string
 		verify      func(t *testing.T, db *sql.DB, ops libschema.Options)
+		verifyLog   func(t *testing.T, entries []logEntry)
 	}
 	cases := []struct {
 		name   string
@@ -93,6 +134,35 @@ func TestPostgresNonTxCases(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:  "runtime_failure",
+			label: "rfail",
+			script: func() ([]libschema.Migration, outcome) {
+				tab1 := lspostgres.Script("T1", "CREATE TABLE IF NOT EXISTS rtf (id int)")
+				tab2 := lspostgres.Script("T2", "CREATE TABLE rtf (id int)")
+				return []libschema.Migration{tab1, tab2}, outcome{
+					expectErr: true,
+					verifyLog: func(t *testing.T, entries []logEntry) {
+						found := false
+						for _, entry := range entries {
+							if entry.msg != "migration success" {
+								continue
+							}
+							for _, fields := range entry.fields {
+								if fields == nil {
+									continue
+								}
+								if sqlText, ok := fields["sql"]; ok {
+									assert.Equal(t, "CREATE TABLE IF NOT EXISTS rtf (id int)", sqlText)
+									found = true
+								}
+							}
+						}
+						assert.True(t, found, "expected migration success log to include sql note")
+					},
+				}
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -101,7 +171,8 @@ func TestPostgresNonTxCases(t *testing.T) {
 			_, err := db.Exec("CREATE SCHEMA " + ops.SchemaOverride)
 			require.NoError(t, err)
 			s := libschema.New(context.Background(), ops)
-			log := libschema.LogFromLog(t)
+			capLog := &captureLog{t: t}
+			log := libschema.LogFromLogur(capLog)
 			dbase, err := lspostgres.New(log, tc.label, s, db)
 			require.NoError(t, err)
 			migs, out := tc.script()
@@ -111,6 +182,9 @@ func TestPostgresNonTxCases(t *testing.T) {
 				require.Error(t, err)
 				if out.errContains != "" {
 					assert.Contains(t, err.Error(), out.errContains)
+				}
+				if out.verifyLog != nil {
+					out.verifyLog(t, capLog.Entries())
 				}
 				return
 			}
