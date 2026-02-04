@@ -178,6 +178,7 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 
 	lastUnfishedSyncronous := d.lastUnfinishedSynchrnous()
 
+	syncExecuted := make([]Migration, 0, len(d.sequence))
 	for i, m := range d.sequence {
 		if m.Base().Status().Done {
 			if d.Options.DebugLogging {
@@ -206,7 +207,9 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 		var stop bool
 		stop, err = d.doOneMigration(ctx, m)
 		if err != nil {
-			d.reportSequenceError(d.sequence[0:i+1], err, "sychronous")
+			d.reportSequenceError(syncExecuted, err, "sychronous")
+		} else {
+			syncExecuted = append(syncExecuted, m)
 		}
 		if err != nil || stop {
 			return err
@@ -217,11 +220,11 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 
 func (d *Database) reportSequenceError(migrations []Migration, err error, syncOrAsync string) {
 	// report migrations that succeeded
-	if len(migrations) > 1 {
+	if len(migrations) > 0 {
 		d.log.Info("migrations succeeded before eventual failre", map[string]any{
-			"number_succeeded": len(migrations) - 1,
+			"number_succeeded": len(migrations),
 		})
-		for i := 0; i < len(migrations)-1; i++ {
+		for i := 0; i < len(migrations); i++ {
 			m := migrations[i].Base()
 			d.log.Info("migration success", map[string]any{
 				"name":            string(m.Name.Name),
