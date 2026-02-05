@@ -284,7 +284,7 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 	var repeatCount int
 	var totalRowsModified int64
 	for {
-		result, err := d.driver.DoOneMigration(ctx, d.log, d, m)
+		rowsAffected, err := d.driver.DoOneMigration(ctx, d.log, d, m)
 		if err != nil {
 			if d.Options.OnMigrationFailure != nil {
 				d.log.Debug(" migration failed", map[string]interface{}{
@@ -296,24 +296,22 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			m.Base().SetNote("reason", "tried and failed")
 			m.Base().SetNote("error", err)
 		}
-		if m.Base().repeatUntilNoOp && err == nil && result != nil {
-			ra, err := result.RowsAffected()
-			if err != nil {
-				m.Base().SetNote("applied", false)
-				m.Base().SetNote("reason", "tried, fetching rows affected failed")
-				m.Base().SetNote("error", errors.WithStack(err))
-				return false, err
-			}
-			totalRowsModified += ra
+		d.log.Info("XXX ", map[string]interface{}{
+			"name":   m.Base().Name.Name,
+			"repeat": m.Base().repeatUntilNoOp,
+		})
+
+		if m.Base().repeatUntilNoOp && err == nil {
+			totalRowsModified += rowsAffected
 			m.Base().SetNote("rows_modified", totalRowsModified)
-			if ra == 0 {
+			if rowsAffected == 0 {
 				return false, nil
 			}
 			repeatCount++
 			m.Base().SetNote("repeat_count", repeatCount)
 			d.log.Info("migration modified rows, repeating", map[string]interface{}{
 				"repeatCount":  repeatCount,
-				"rowsModified": ra,
+				"rowsModified": rowsAffected,
 			})
 			continue
 		}

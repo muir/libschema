@@ -39,9 +39,8 @@ type Driver interface {
 	// DoOneMigration must update the both the migration status in
 	// the Database object and it must persist the migration status
 	// in the tracking table.  It also does the migration.
-	// The returned sql.Result is optional: Computed() migrations do not
-	// need to provide results.  The result is used for RepeatUntilNoOp.
-	DoOneMigration(context.Context, *internal.Log, *Database, Migration) (sql.Result, error)
+	// Computed() migrations do not need to return the number of rows affected.
+	DoOneMigration(context.Context, *internal.Log, *Database, Migration) (rowsAffected int64, err error)
 
 	// IsMigrationSupported exists to guard against additional migration
 	// options and features.  It should return nil except if there are new

@@ -40,15 +40,20 @@ func TestComputedInference(t *testing.T) {
 
 	calledTx := false
 	calledDB := false
+	calledConn := false
 	cTx := lsmysql.Computed[*sql.Tx]("C_TX", func(_ context.Context, _ *sql.Tx) error { calledTx = true; return nil })
 	cDB := lsmysql.Computed[*sql.DB]("C_DB", func(_ context.Context, _ *sql.DB) error { calledDB = true; return nil })
+	cConn := lsmysql.Computed[*sql.Conn]("C_Conn", func(_ context.Context, _ *sql.Conn) error { calledConn = true; return nil })
 
-	dbase.Migrations("L1", cTx, cDB)
+	dbase.Migrations("L1", cTx, cDB, cConn)
 	require.NoError(t, s.Migrate(context.Background()))
 
-	require.True(t, calledTx && calledDB, "computed migrations not both invoked")
+	require.True(t, calledTx, "tx called")
+	require.True(t, calledDB, "db called")
+	require.True(t, calledConn, "conn called")
 	require.False(t, cTx.Base().NonTransactional(), "Computed[*sql.Tx] incorrectly inferred non-transactional")
 	require.True(t, cDB.Base().NonTransactional(), "Computed[*sql.DB] did not infer non-transactional")
+	require.True(t, cConn.Base().NonTransactional(), "Computed[*sql.Conn] did not infer non-transactional")
 }
 
 // TestForceOverride validates ForceTransactional / ForceNonTransactional override inference.

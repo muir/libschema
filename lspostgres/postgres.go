@@ -17,6 +17,7 @@ import (
 	"github.com/muir/libschema/classifysql"
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/internal/migfinalize"
+	"github.com/muir/sqltoken"
 )
 
 // Postgres is a libschema.Driver for connecting to Postgres-like databases that
@@ -38,23 +39,28 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 	return schema.NewDatabase(log, dbName, db, &Postgres{log: log})
 }
 
-type ConnPtr interface{ *sql.Tx | *sql.DB }
+type ConnPtr interface{ *sql.Tx | *sql.DB | *sql.Conn }
 
 type pmigration struct {
 	libschema.MigrationBase
 	scriptSQL string
 	// genFn always uses the (string, error) internal form.
-	genFn      func(context.Context, *sql.Tx) (string, error)
-	computedTx func(context.Context, *sql.Tx) error
-	computedDB func(context.Context, *sql.DB) error
+	genFn        func(context.Context, *sql.Tx) (string, error)
+	computedTx   func(context.Context, *sql.Tx) error
+	computedDB   func(context.Context, *sql.DB) error
+	computedConn func(context.Context, *sql.Conn) error
+}
+
+type canExecContext interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
 // applySchemaOverridePostgres sets search_path in a transaction if override provided.
-func applySchemaOverridePostgres(ctx context.Context, tx *sql.Tx, override, migName string) error {
+func applySchemaOverridePostgres(ctx context.Context, tx canExecContext, override, migName string) error {
 	if override == "" {
 		return nil
 	}
-	if _, err := tx.Exec(`SET search_path TO ` + pq.QuoteIdentifier(override)); err != nil {
+	if _, err := tx.ExecContext(ctx, `SET search_path TO `+pq.QuoteIdentifier(override)); err != nil {
 		return errors.Wrapf(err, "set search path to %s for %s", override, migName)
 	}
 	return nil
@@ -110,20 +116,23 @@ func Generate(name string, generator func(context.Context, *sql.Tx) string, opts
 // transactionally or if it runs outside a transaction:
 //
 //	func(context.Context, *sql.Tx) error // run transactionlly
-//	func(context.Context, *sql.DB) error // run non-transactionally
+//	func(context.Context, *sql.DB) error // run non-transactionally WITHOUT the schema being set
+//	func(context.Context, *sql.Conn) error // run non-transactionally with the schema path being set
 func Computed[T ConnPtr](name string, action func(context.Context, T) error, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}}
 	// Detect which concrete generic type was requested by instantiating a zero value and
 	// performing type switch on its dynamic type via any(zero).
-	var zero T
-	switch any(zero).(type) {
-	case *sql.Tx:
-		pm.computedTx = func(ctx context.Context, tx *sql.Tx) error { return action(ctx, any(tx).(T)) }
-	case *sql.DB:
+	switch a := any(action).(type) {
+	case func(context.Context, *sql.Tx) error:
+		pm.computedTx = a
+	case func(context.Context, *sql.DB) error:
 		pm.MigrationBase.SetNonTransactional(true) //nolint:staticcheck
-		pm.computedDB = func(ctx context.Context, db *sql.DB) error { return action(ctx, any(db).(T)) }
+		pm.computedDB = a
+	case func(context.Context, *sql.Conn) error:
+		pm.MigrationBase.SetNonTransactional(true) //nolint:staticcheck
+		pm.computedConn = a
 	default:
-		panic("unsupported generic type in Computed")
+		panic(errors.Errorf("unsupported generic type in Computed: %T", action))
 	}
 	lsm := libschema.Migration(pm)
 	for _, opt := range opts {
@@ -134,7 +143,7 @@ func Computed[T ConnPtr](name string, action func(context.Context, T) error, opt
 
 // DoOneMigration applies a single migration.
 // It is expected to be called by libschema.
-func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (result sql.Result, _ error) {
+func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *libschema.Database, m libschema.Migration) (rowsAffected int64, _ error) {
 	pm := m.(*pmigration)
 
 	if p.serverMajor == 0 {
@@ -144,6 +153,21 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 	}
 
 	pm.ApplyForceOverride()
+
+	runSQL := func(ctx context.Context, tx canExecContext, scriptSQL string) error {
+		for _, commandSQL := range sqltoken.TokenizePostgreSQL(scriptSQL).CmdSplitUnstripped().Strings() {
+			result, err := tx.ExecContext(ctx, commandSQL)
+			if err != nil {
+				return errors.Wrap(err, commandSQL)
+			}
+			ra, err := result.RowsAffected()
+			if err != nil {
+				return errors.Wrap(err, "get rows affected for "+commandSQL)
+			}
+			rowsAffected += ra
+		}
+		return nil
+	}
 
 	f := &migfinalize.Finalizer[sql.DB, sql.Tx]{
 		Ctx: ctx,
@@ -188,6 +212,23 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				}
 				return errors.Wrapf(pm.computedDB(ctx, d.DB()), "callback %s", m.Base().Name)
 			}
+			if pm.computedConn != nil {
+				if !m.Base().NonTransactional() {
+					return errors.Errorf("cannot execute *sql.DB computed callback %s when forced transactional", m.Base().Name)
+				}
+				conn, err := d.DB().Conn(ctx)
+				if err != nil {
+					return errors.Wrap(err, "get connection")
+				}
+				defer func() {
+					_ = conn.Close()
+				}()
+				err = applySchemaOverridePostgres(ctx, conn, d.Options.SchemaOverride, m.Base().Name.Name)
+				if err != nil {
+					return err
+				}
+				return errors.Wrapf(pm.computedConn(ctx, conn), "callback %s", m.Base().Name)
+			}
 			// Script / Generate path
 			scriptSQL := pm.scriptSQL
 			if pm.genFn != nil {
@@ -207,6 +248,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 			if err != nil {
 				return errors.Wrap(err, "classify postgres migration")
 			}
+			// Determine if transactional of not (if not already known)
 			if !pm.Base().ForcedTransactional() && !pm.Base().NonTransactional() {
 				mustNonTx := false
 				for _, st := range cstmts {
@@ -220,20 +262,14 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				}
 			}
 			if !pm.Base().NonTransactional() {
-				var err error
-				result, err = tx.ExecContext(ctx, scriptSQL)
-				return errors.Wrapf(err, "ran %s in a transaction", scriptSQL)
+				return runSQL(ctx, tx, scriptSQL)
 			}
-			// Non-transactional validation (final mode is non-tx)
-			if d.Options.SchemaOverride != "" {
-				if _, err := d.DB().ExecContext(ctx, "SET search_path TO "+pq.QuoteIdentifier(d.Options.SchemaOverride)); err != nil {
-					return errors.Wrapf(err, "set search_path to %s for %s", d.Options.SchemaOverride, m.Base().Name)
-				}
-			}
+
 			// Expect exactly one non-empty real statement (CountNonEmpty excludes SET)
 			if cstmts.CountNonEmpty() != 1 {
 				return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement", m.Base().Name)
 			}
+			// Non-transactional validation (final mode is non-tx)
 			firstReal := cstmts.FirstReal()
 			if firstReal.Flags&classifysql.IsNonIdempotent != 0 && !m.Base().HasSkipIf() {
 				if firstReal.Flags&classifysql.IsEasilyIdempotentFix != 0 {
@@ -241,9 +277,19 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				}
 				return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent: %s", m.Base().Name, firstReal.StripString())
 			}
-			var execErr error
-			result, execErr = d.DB().ExecContext(ctx, scriptSQL)
-			return errors.Wrap(execErr, scriptSQL)
+
+			conn, err := d.DB().Conn(ctx)
+			if err != nil {
+				return errors.Wrap(err, "get connection")
+			}
+			defer func() {
+				_ = conn.Close()
+			}()
+			err = applySchemaOverridePostgres(ctx, conn, d.Options.SchemaOverride, m.Base().Name.Name)
+			if err != nil {
+				return err
+			}
+			return runSQL(ctx, conn, scriptSQL)
 		},
 		SaveStatus: func(ctx context.Context, tx *sql.Tx, migErr error) error {
 			return errors.WithStack(p.saveStatus(log, tx, d, m, migErr == nil, migErr))
@@ -254,7 +300,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 		SetError:   func(err error) { m.Base().SetStatus(libschema.MigrationStatus{Error: err.Error()}) },
 	}
 
-	return result, errors.WithStack(f.Run())
+	return rowsAffected, errors.WithStack(f.Run())
 }
 
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
@@ -438,7 +484,7 @@ func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ *internal.Log, 
 	if !ok {
 		return errors.Errorf("non-postgres migration %s registered with postgres migrations", migration.Base().Name)
 	}
-	if m.genFn != nil || m.computedTx != nil || m.computedDB != nil || m.scriptSQL != "" {
+	if m.genFn != nil || m.computedTx != nil || m.computedDB != nil || m.scriptSQL != "" || m.computedConn != nil {
 		return nil
 	}
 	return errors.Errorf("migration %s is not supported", migration.Base().Name)
