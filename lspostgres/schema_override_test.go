@@ -38,19 +38,19 @@ func TestSchemaOverrideTransactional(t *testing.T) {
 
 	// Migration creates table with unqualified name; should land in SchemaOverride schema.
 	dbase.Migrations("L1",
-		lspostgres.Script("CREATE_T", "CREATE TABLE so_test (id int)"),
+		lspostgres.Script("CREATE_T", "CREATE TABLE so_test2 (id int)"),
 	)
 
 	require.NoError(t, s.Migrate(ctx))
 
 	// Verify table exists only within SchemaOverride schema.
 	var count int
-	err = db.QueryRow(`SELECT count(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'so_test'`, opts.SchemaOverride).Scan(&count)
+	err = db.QueryRow(`SELECT count(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'so_test2'`, opts.SchemaOverride).Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, 1, count, "expected so_test in override schema")
+	assert.Equal(t, 1, count, "expected so_test2 in override schema")
 
 	// Sanity: ensure no table with same name in public schema.
-	err = db.QueryRow(`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'so_test'`).Scan(&count)
+	err = db.QueryRow(`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'so_test2'`).Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count, "should not create table in public schema when SchemaOverride set")
 }

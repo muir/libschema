@@ -167,6 +167,46 @@ func TestComputedDBInference(t *testing.T) {
 	assert.True(t, ran)
 }
 
+// TestComputedConnInference ensures Computed[*sql.Conn] is inferred non-transactional and runs logic.
+func TestComputedConnInference(t *testing.T) {
+	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_POSTGRES_TEST_DSN to test libschema/lspostgres")
+	}
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, db.Close()) }()
+	opts, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	defer cleanup(db)
+	_, err = db.Exec("CREATE SCHEMA " + opts.SchemaOverride)
+	require.NoError(t, err)
+	ctx := context.Background()
+	s := libschema.New(ctx, opts)
+	log := libschema.LogFromLog(t)
+	dbase, err := lspostgres.New(log, "test_comp_conn", s, db)
+	require.NoError(t, err)
+	ran := false
+	lib := fmt.Sprintf("%s_%d", t.Name(), time.Now().UnixNano())
+	comp := lspostgres.Computed[*sql.Conn]("COMP_CONN_"+lib, func(ctx context.Context, conn *sql.Conn) error {
+		if _, e := conn.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS comp_conn_inf (id int)"); e != nil {
+			return e
+		}
+		if _, e := conn.ExecContext(ctx, "INSERT INTO comp_conn_inf (id) VALUES (3)"); e != nil {
+			return e
+		}
+		ran = true
+		return nil
+	})
+	dbase.Migrations(lib, comp)
+	require.NoError(t, s.Migrate(ctx))
+	assert.True(t, comp.Base().NonTransactional())
+	assert.True(t, ran)
+	row := db.QueryRowContext(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'comp_conn_inf'", opts.SchemaOverride)
+	var count int
+	require.NoError(t, row.Scan(&count))
+	assert.Equal(t, 1, count)
+}
+
 // TestComputedFailure ensures a computed migration that returns an error surfaces it and records failure.
 func TestComputedFailure(t *testing.T) {
 	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")

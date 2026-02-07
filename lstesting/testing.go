@@ -23,6 +23,7 @@ func RandomString(n int) string {
 type T interface {
 	assert.TestingT
 	Logf(string, ...interface{})
+	Log(...any)
 }
 
 // FakeSchema generates an Options config with a fake random schema name
@@ -30,6 +31,7 @@ type T interface {
 // remove that schema -- the function should work with Postgres and Mysql.
 func FakeSchema(t T, cascade string) (libschema.Options, func(db *sql.DB)) {
 	schemaName := "lstest_" + RandomString(15)
+	t.Log("XXX using schema", schemaName)
 	return libschema.Options{
 			TrackingTable:  schemaName + ".tracking_table",
 			SchemaOverride: schemaName,
