@@ -19,11 +19,11 @@ func aggregateFlags(stmts Statements) Flag {
 
 func TestClassifyBasicCases(t *testing.T) {
 	cases := []struct {
-		name string
-		d    Dialect
+		name  string
+		d     Dialect
 		major int
-		sql  string
-		want Flag // aggregate (excluding multi) expected bits
+		sql   string
+		want  Flag // aggregate (excluding multi) expected bits
 		multi bool
 	}{
 		{"simple ddl non-idempotent", DialectMySQL, 0, "CREATE TABLE t (id int)", IsDDL | IsNonIdempotent | IsEasilyIdempotentFix, false},
@@ -44,10 +44,14 @@ func TestClassifyBasicCases(t *testing.T) {
 		// Round trip check (ignoring trailing semicolon in original)
 		orig := strings.TrimSuffix(tc.sql, ";")
 		recon := strings.Join(stmts.TokensList().Strings(), ";")
+		t.Logf("recon Join(TokensList().Strings()): %s", recon)
 		if strings.HasSuffix(tc.sql, ";") {
 			assert.True(t, recon == orig || recon+";" == tc.sql, tc.name+": round-trip mismatch")
 		} else {
 			assert.Equal(t, orig, recon, tc.name+": round-trip mismatch")
 		}
+		recon2 := stmts.TokensList().Join().String()
+		t.Logf("recon2 TokensList().Join().String(): %s", recon2)
+		assert.Equal(t, recon, recon2, "recon vs recon2")
 	}
 }
