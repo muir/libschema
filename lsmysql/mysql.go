@@ -200,6 +200,14 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 	runSQL := func(ctx context.Context, execer canExecContext, sqlText string) error {
 		for _, commandSQL := range sqltoken.TokenizeMySQL(sqlText).CmdSplitUnstripped().Strings() {
 			result, err := execer.ExecContext(ctx, commandSQL)
+			if d.Options.DebugLogging {
+				log.Debug("Executed SQL", map[string]any{
+					"name":   m.Base().Name.Name,
+					"sql":    commandSQL,
+					"method": fmt.Sprintf("%T", execer),
+					"err":    err,
+				})
+			}
 			if err != nil {
 				return errors.Wrap(err, commandSQL)
 			}
