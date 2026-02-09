@@ -219,6 +219,10 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 }
 
 func (d *Database) reportSequenceError(migrations []Migration, err error, syncOrAsync string) {
+	if d.Options.DebugLogging {
+		// this output would be redundant
+		return
+	}
 	// report migrations that succeeded
 	if len(migrations) > 0 {
 		d.log.Info("migrations succeeded before eventual failre", map[string]any{
@@ -296,10 +300,6 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			m.Base().SetNote("reason", "tried and failed")
 			m.Base().SetNote("error", err)
 		}
-		d.log.Info("XXX ", map[string]interface{}{
-			"name":   m.Base().Name.Name,
-			"repeat": m.Base().repeatUntilNoOp,
-		})
 
 		if m.Base().repeatUntilNoOp && err == nil {
 			totalRowsModified += rowsAffected
