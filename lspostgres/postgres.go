@@ -157,6 +157,14 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 	runSQL := func(ctx context.Context, tx canExecContext, scriptSQL string) error {
 		for _, commandSQL := range sqltoken.TokenizePostgreSQL(scriptSQL).CmdSplitUnstripped().Strings() {
 			result, err := tx.ExecContext(ctx, commandSQL)
+			if d.Options.DebugLogging {
+				log.Debug("Executed SQL", map[string]any{
+					"name":   m.Base().Name.Name,
+					"sql":    commandSQL,
+					"method": fmt.Sprintf("%T", tx),
+					"err":    err,
+				})
+			}
 			if err != nil {
 				return errors.Wrap(err, commandSQL)
 			}
