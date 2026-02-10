@@ -146,8 +146,10 @@ func (s *Statement) classify() {
 		s.Flags = IsDDL | IsNonIdempotent
 	case "truncate":
 		s.Flags = IsDDL
-	case "insert", "update", "delete", "replace", "call", "do", "load", "handler", "import", "with":
+	case "insert", "update", "delete", "replace", "call", "load", "handler", "import", "with":
 		s.Flags = IsDML
+	case "do":
+		// it could be anything, ignore
 	}
 	if s.dialect == DialectPostgres && isPostgresMustNonTxVersion(s.strippedString, s.version) {
 		s.Flags |= IsMustNonTx
