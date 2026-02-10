@@ -14,8 +14,8 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/classifysql"
 	"github.com/muir/libschema/internal"
+	"github.com/muir/libschema/internal/mhelp"
 	"github.com/muir/libschema/internal/migfinalize"
-	"github.com/muir/sqltoken"
 )
 
 // MySQL is a libschema.Driver for connecting to MySQL-like databases that
@@ -53,14 +53,10 @@ type MySQL struct {
 	skipDatabase        bool
 }
 
-type canExecContext interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
 // applySchemaOverrideMySQL sets the database (schema) for the current connection/transaction
 // if override is non-empty. It validates identifier simplicity. Works with either *sql.Tx
 // or *sql.DB (passed as interface) executing USE outside of a transaction when needed.
-func applySchemaOverrideMySQL(ctx context.Context, execer canExecContext, override, migName string,
+func applySchemaOverrideMySQL(ctx context.Context, execer mhelp.CanExecContext, override, migName string,
 ) error { // minimal interface for *sql.Tx and *sql.DB
 	if override == "" {
 		return nil
@@ -197,29 +193,6 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 	pm.ApplyForceOverride()
 	rawDB := d.DB()
 
-	runSQL := func(ctx context.Context, execer canExecContext, sqlText string) error {
-		for _, commandSQL := range sqltoken.TokenizeMySQL(sqlText).CmdSplitUnstripped().Strings() {
-			result, err := execer.ExecContext(ctx, commandSQL)
-			if d.Options.DebugLogging {
-				log.Debug("Executed SQL", map[string]any{
-					"name":   m.Base().Name.Name,
-					"sql":    commandSQL,
-					"method": fmt.Sprintf("%T", execer),
-					"err":    err,
-				})
-			}
-			if err != nil {
-				return errors.Wrap(err, commandSQL)
-			}
-			ra, err := result.RowsAffected()
-			if err != nil {
-				return errors.Wrap(err, "get rows affected for "+commandSQL)
-			}
-			rowsAffected += ra
-		}
-		return nil
-	}
-
 	f := &migfinalize.Finalizer[sql.DB, sql.Tx]{
 		Ctx: ctx,
 		DB:  rawDB,
@@ -285,12 +258,12 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 			if sqlText == "" {
 				return nil
 			}
-			cstmts, err := classifysql.ClassifyTokens(classifysql.DialectMySQL, 0, sqlText)
+			statements, err := classifysql.ClassifyTokens(classifysql.DialectMySQL, 0, sqlText)
 			if err != nil {
 				return errors.Wrap(err, "classify mysql migration")
 			}
 
-			summary := cstmts.Summarize()
+			summary := statements.Summarize()
 			if summary.Includes(classifysql.IsDDL) {
 				if summary.Includes(classifysql.IsDML) {
 					return errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
@@ -301,7 +274,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				if !m.Base().NonTransactional() {
 					pm.SetNonTransactional(true)
 				}
-				for _, st := range cstmts {
+				for _, st := range statements {
 					if st.Flags&(classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) == (classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) && !m.Base().HasSkipIf() {
 						text := st.Tokens.Strip().String()
 						return errors.Errorf("non-idempotent DDL '%s': %w", text, libschema.ErrNonIdempotentDDL)
@@ -310,7 +283,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 			}
 
 			if !m.Base().NonTransactional() {
-				return runSQL(ctx, tx, sqlText)
+				return mhelp.RunSQL(ctx, log, tx, statements, &rowsAffected, m, d)
 			}
 			conn, err := rawDB.Conn(ctx)
 			if err != nil {
@@ -322,7 +295,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 			if err := applySchemaOverrideMySQL(ctx, conn, d.Options.SchemaOverride, m.Base().Name.Name); err != nil {
 				return err
 			}
-			return runSQL(ctx, conn, sqlText)
+			return mhelp.RunSQL(ctx, log, conn, statements, &rowsAffected, m, d)
 		},
 		SaveStatus: func(ctx context.Context, tx *sql.Tx, migErr error) error {
 			return errors.WithStack(p.saveStatus(log, tx, d, m, migErr == nil, migErr))
@@ -459,7 +432,7 @@ func (p *MySQL) LockMigrationsTable(ctx context.Context, _ *internal.Log, d *lib
 	}
 	tx, err := d.DB().BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return errors.Wrap(err, "Could not start transaction: %s")
+		return errors.Wrap(err, "could not start transaction: %s")
 	}
 	p.lockStr = "libschema_" + tableName
 	var gotLock int
@@ -539,7 +512,7 @@ func (p *MySQL) UnlockMigrationsTable(_ *internal.Log) error {
 	}()
 	_, err := p.lockTx.Exec(`SELECT RELEASE_LOCK(?)`, p.lockStr)
 	if err != nil {
-		return errors.Wrap(err, "Could not release explicit lock for schema migrations")
+		return errors.Wrap(err, "could not release explicit lock for schema migrations")
 	}
 	return nil
 }

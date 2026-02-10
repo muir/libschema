@@ -392,6 +392,10 @@ func (m *MigrationBase) Notes() map[string]any {
 	return m.notes
 }
 
+func (m *MigrationBase) RepeatUntilNoOp() bool {
+	return m.repeatUntilNoOp
+}
+
 // NonTransactional reports if the migration must not be wrapped in a transaction.
 // This is automatically set for drivers (e.g. Postgres) that provide generic
 // migration helpers which infer non-transactional status from the connection
