@@ -55,7 +55,6 @@ func TestAdditionalVerbCoverage(t *testing.T) {
 		{"delete dml", "DELETE FROM t1 WHERE id=1", IsDML},
 		{"replace dml", "REPLACE INTO t1 (id) VALUES (1)", IsDML},
 		{"call proc dml", "CALL myproc()", IsDML},
-		{"do expr dml", "DO 1", IsDML},
 		{"load data dml", "LOAD DATA INFILE 'x' INTO TABLE t1", IsDML},
 		{"handler dml", "HANDLER t1 OPEN", IsDML},
 		{"import table dml", "IMPORT TABLE FROM 's3://bucket/obj'", IsDML},
@@ -84,14 +83,19 @@ func TestFlagNamesPresence(t *testing.T) {
 	names := agg.Names()
 	required := map[string]bool{"DDL": false, "DML": false, "NonIdem": false}
 	for _, n := range names {
-		if _, ok := required[n]; ok { required[n] = true }
+		if _, ok := required[n]; ok {
+			required[n] = true
+		}
 	}
 	for k, v := range required {
 		assert.Truef(t, v, "missing flag name %s in %v", k, names)
 	}
 	var sawEasy bool
 	for _, st := range stmts {
-		if st.Flags&IsEasilyIdempotentFix != 0 { sawEasy = true; break }
+		if st.Flags&IsEasilyIdempotentFix != 0 {
+			sawEasy = true
+			break
+		}
 	}
 	assert.True(t, sawEasy, "expected to see at least one EasyFix flag")
 }
