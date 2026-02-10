@@ -30,18 +30,29 @@ func TestGenerateSuccess(t *testing.T) {
 	db := openPG(t)
 	opts, _ := lstesting.FakeSchema(t, "")
 	s := libschema.New(context.Background(), opts)
-	log := libschema.LogFromLog(t)
+	capLog := &captureLog{t: t}
+	log := libschema.LogFromLogur(capLog)
 	dbase, err := lspostgres.New(log, "gen_success", s, db)
 	require.NoError(t, err)
 	create := lspostgres.Generate("GEN_CREATE", func(_ context.Context, _ *sql.Tx) string {
-		return "CREATE TABLE IF NOT EXISTS force_nontx_tab (id int)"
+		return "CREATE TYPE FOOBAR_TYPE AS ENUM ('A', 'B', 'C')"
 	})
-	forced := lspostgres.Generate("GEN_FORCE_NONTX", func(_ context.Context, _ *sql.Tx) string { return "INSERT INTO force_nontx_tab(id) VALUES (1)" }, libschema.ForceNonTransactional())
+	forced := lspostgres.Generate("GEN_FORCE_NONTX", func(_ context.Context, _ *sql.Tx) string {
+		return "ALTER TYPE FOOBAR_TYPE RENAME VALUE 'B' TO 'E'"
+	}, libschema.ForceNonTransactional())
 	dbase.Migrations("GEN_LIB", create, forced)
 	require.NoError(t, s.Migrate(context.Background()))
 	assert.False(t, create.Base().NonTransactional(), "create Generate should be transactional")
 	assert.True(t, forced.Base().ForcedNonTransactional(), "forced non-tx Generate should be marked forced non-transactional")
-	var cnt int
-	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM force_nontx_tab").Scan(&cnt))
-	assert.Equal(t, 1, cnt)
+	entries := capLog.Entries()
+	found := false
+	for _, entry := range entries {
+		t.Logf("msg = '%s'", entry.msg)
+		if entry.msg != "Warning - non-transactional migration contains non-idempotent command" {
+			continue
+		}
+		found = true
+		break
+	}
+	assert.True(t, found, "expected rows affected error, not found")
 }

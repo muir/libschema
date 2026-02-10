@@ -125,8 +125,16 @@ func TestBadMigrationsPostgres(t *testing.T) {
 				)
 			},
 		},
-		// Add sentinel-based validation cases (non-idempotent / mixes data & DDL) formerly enforced
-		// (Removed forced non-transactional idempotency and multi-stmt cases; ForceNonTransactional bypass semantics retained elsewhere.)
+		{
+			name:      "dml in forced transactional",
+			substring: `contains data manipulation language`,
+			define: func(dbase *libschema.Database) {
+				dbase.Migrations("L10",
+					lspostgres.Script("T4", `CREATE TABLE T1 (id text)`),
+					lspostgres.Script("T5", `INSERT INTO T1 (id) VALUES (3)`, libschema.ForceNonTransactional()),
+				)
+			},
+		},
 	}
 
 	for _, tc := range cases {
