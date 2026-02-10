@@ -256,7 +256,14 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				if firstReal.Flags&classifysql.IsEasilyIdempotentFix != 0 {
 					return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent statement missing IF [NOT] EXISTS: %s", m.Base().Name, firstReal.StripString())
 				}
-				return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent: %s", m.Base().Name, firstReal.StripString())
+				log.Info("Warning - non-transactional migration contains non-idempotent command", map[string]any{
+					"name":    m.Base().Name.Name,
+					"library": m.Base().Name.Library,
+					"sql":     firstReal.Tokens.String(),
+				})
+			}
+			if example, ok := statements.Summarize()[classifysql.IsDML]; ok {
+				return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains data manipulation language: %s", m.Base().Name, example.Strip().String())
 			}
 
 			conn, err := d.DB().Conn(ctx)
