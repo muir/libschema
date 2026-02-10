@@ -16,8 +16,8 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/classifysql"
 	"github.com/muir/libschema/internal"
+	"github.com/muir/libschema/internal/mhelp"
 	"github.com/muir/libschema/internal/migfinalize"
-	"github.com/muir/sqltoken"
 )
 
 // Postgres is a libschema.Driver for connecting to Postgres-like databases that
@@ -51,12 +51,8 @@ type pmigration struct {
 	computedConn func(context.Context, *sql.Conn) error
 }
 
-type canExecContext interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
 // applySchemaOverridePostgres sets search_path in a transaction if override provided.
-func applySchemaOverridePostgres(ctx context.Context, tx canExecContext, override, migName string) error {
+func applySchemaOverridePostgres(ctx context.Context, tx mhelp.CanExecContext, override, migName string) error {
 	if override == "" {
 		return nil
 	}
@@ -154,29 +150,6 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 
 	pm.ApplyForceOverride()
 
-	runSQL := func(ctx context.Context, tx canExecContext, scriptSQL string) error {
-		for _, commandSQL := range sqltoken.TokenizePostgreSQL(scriptSQL).CmdSplitUnstripped().Strings() {
-			result, err := tx.ExecContext(ctx, commandSQL)
-			if d.Options.DebugLogging {
-				log.Debug("Executed SQL", map[string]any{
-					"name":   m.Base().Name.Name,
-					"sql":    commandSQL,
-					"method": fmt.Sprintf("%T", tx),
-					"err":    err,
-				})
-			}
-			if err != nil {
-				return errors.Wrap(err, commandSQL)
-			}
-			ra, err := result.RowsAffected()
-			if err != nil {
-				return errors.Wrap(err, "get rows affected for "+commandSQL)
-			}
-			rowsAffected += ra
-		}
-		return nil
-	}
-
 	f := &migfinalize.Finalizer[sql.DB, sql.Tx]{
 		Ctx: ctx,
 		DB:  d.DB(),
@@ -252,14 +225,14 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				return nil
 			}
 			// Classification & downgrade via classifysql
-			cstmts, err := classifysql.ClassifyTokens(classifysql.DialectPostgres, p.serverMajor, scriptSQL)
+			statements, err := classifysql.ClassifyTokens(classifysql.DialectPostgres, p.serverMajor, scriptSQL)
 			if err != nil {
 				return errors.Wrap(err, "classify postgres migration")
 			}
 			// Determine if transactional of not (if not already known)
 			if !pm.Base().ForcedTransactional() && !pm.Base().NonTransactional() {
 				mustNonTx := false
-				for _, st := range cstmts {
+				for _, st := range statements {
 					if st.Flags&classifysql.IsMustNonTx != 0 {
 						mustNonTx = true
 						break
@@ -270,15 +243,15 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				}
 			}
 			if !pm.Base().NonTransactional() {
-				return runSQL(ctx, tx, scriptSQL)
+				return mhelp.RunSQL(ctx, log, tx, statements, &rowsAffected, m, d)
 			}
 
 			// Expect exactly one non-empty real statement (CountNonEmpty excludes SET)
-			if cstmts.CountNonEmpty() != 1 {
+			if statements.CountNonEmpty() != 1 {
 				return errors.Wrapf(libschema.ErrNonTxMultipleStatements, "non-transactional migration %s must contain exactly one SQL statement", m.Base().Name)
 			}
 			// Non-transactional validation (final mode is non-tx)
-			firstReal := cstmts.FirstReal()
+			firstReal := statements.FirstReal()
 			if firstReal.Flags&classifysql.IsNonIdempotent != 0 && !m.Base().HasSkipIf() {
 				if firstReal.Flags&classifysql.IsEasilyIdempotentFix != 0 {
 					return errors.Wrapf(libschema.ErrNonIdempotentNonTx, "non-transactional migration %s contains non-idempotent statement missing IF [NOT] EXISTS: %s", m.Base().Name, firstReal.StripString())
@@ -297,7 +270,7 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 			if err != nil {
 				return err
 			}
-			return runSQL(ctx, conn, scriptSQL)
+			return mhelp.RunSQL(ctx, log, conn, statements, &rowsAffected, m, d)
 		},
 		SaveStatus: func(ctx context.Context, tx *sql.Tx, migErr error) error {
 			return errors.WithStack(p.saveStatus(log, tx, d, m, migErr == nil, migErr))

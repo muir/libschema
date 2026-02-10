@@ -251,8 +251,11 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 		})
 	}
 	if err := d.driver.IsMigrationSupported(d, d.log, m); err != nil {
-		d.log.Debug(" migration not supported", map[string]any{
-			"error": err.Error(),
+		d.log.Info(" migration not supported", map[string]any{
+			"database": d.DBName,
+			"library":  m.Base().Name.Library,
+			"name":     m.Base().Name.Name,
+			"error":    err.Error(),
 		})
 		m.Base().SetNote("applied", false)
 		m.Base().SetNote("reason", "not supported")
@@ -265,7 +268,11 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			return false, errors.Wrapf(err, "skipIf %s", m.Base().Name)
 		}
 		if skip {
-			d.log.Debug(" skipping migration")
+			d.log.Debug(" skipping migration", map[string]any{
+				"database": d.DBName,
+				"library":  m.Base().Name.Library,
+				"name":     m.Base().Name.Name,
+			})
 			m.Base().SetNote("applied", false)
 			m.Base().SetNote("reason", "skipped with SkipIf")
 			return false, nil
@@ -278,7 +285,11 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			return false, errors.Wrapf(err, "skipRemainingIf %s", m.Base().Name)
 		}
 		if skip {
-			d.log.Debug(" skipping remaining migrations")
+			d.log.Debug(" skipping remaining migrations", map[string]any{
+				"database": d.DBName,
+				"library":  m.Base().Name.Library,
+				"name":     m.Base().Name.Name,
+			})
 			m.Base().SetNote("applied", false)
 			m.Base().SetNote("reason", "skipped with SkipRemainingIf")
 			return true, nil
@@ -290,15 +301,19 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 	for {
 		rowsAffected, err := d.driver.DoOneMigration(ctx, d.log, d, m)
 		if err != nil {
+			d.log.Info(" migration failed", map[string]interface{}{
+				"database": d.DBName,
+				"name":     m.Base().Name.Name,
+				"library":  m.Base().Name.Library,
+				"error":    err.Error(),
+			})
 			if d.Options.OnMigrationFailure != nil {
-				d.log.Debug(" migration failed", map[string]interface{}{
-					"error": err.Error(),
-				})
 				d.Options.OnMigrationFailure(d, m.Base().Name, err)
 			}
 			m.Base().SetNote("applied", false)
 			m.Base().SetNote("reason", "tried and failed")
 			m.Base().SetNote("error", err)
+			return false, errors.Wrapf(err, "migration %s in library %s failed", m.Base().Name.Name, m.Base().Name.Library)
 		}
 
 		if m.Base().repeatUntilNoOp && err == nil {
@@ -315,7 +330,7 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			})
 			continue
 		}
-		return false, err
+		return false, nil
 	}
 }
 
@@ -336,22 +351,24 @@ func (d *Database) lastUnfinishedSynchrnous() int {
 
 // allDone reports status
 func (d *Database) allDone(m Migration, err error) {
-	if err != nil && m != nil {
-		err = errors.Wrapf(err, "migration %s", m.Base().Name)
-	}
 	if d.Options.OnMigrationsComplete != nil {
 		d.Options.OnMigrationsComplete(d, err)
 	}
-	if err == nil {
-		d.log.Info("Migrations complete", map[string]interface{}{
-			"database": d.DBName,
-		})
-	} else {
-		d.log.Info("Migrations failed", map[string]interface{}{
+	if err != nil {
+		logInfo := map[string]any{
 			"database": d.DBName,
 			"error":    err,
-		})
+		}
+		if m != nil {
+			logInfo["migration"] = m.Base().Name.Name
+			logInfo["library"] = m.Base().Name.Library
+		}
+		d.log.Info("Migrations failed", logInfo)
+		return
 	}
+	d.log.Info("Migrations complete", map[string]interface{}{
+		"database": d.DBName,
+	})
 }
 
 func (d *Database) asyncMigrate(ctx context.Context) {

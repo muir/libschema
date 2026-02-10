@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,4 +195,40 @@ func TestPostgresNonTxCases(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRowsAffectedErrorLogged(t *testing.T) {
+	dsn := os.Getenv("LIBSCHEMA_POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_POSTGRES_TEST_DSN to test libschema/lspostgres")
+	}
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, db.Close()) }()
+	opts, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	defer cleanup(db)
+	_, err = db.Exec("CREATE SCHEMA " + opts.SchemaOverride)
+	require.NoError(t, err)
+	ctx := context.Background()
+	s := libschema.New(ctx, opts)
+	capLog := &captureLog{t: t}
+	log := libschema.LogFromLogur(capLog)
+	dbase, err := lspostgres.New(log, "test_rows_affected", s, db)
+	require.NoError(t, err)
+	lib := fmt.Sprintf("RA_%d", time.Now().UnixNano())
+	comment := lspostgres.Script("NOTHING",
+		" -- just a comment")
+	dbase.Migrations(lib, comment)
+	require.NoError(t, s.Migrate(ctx))
+	entries := capLog.Entries()
+	found := false
+	for _, entry := range entries {
+		t.Logf("msg = '%s'", entry.msg)
+		if entry.msg != "Could not get rows affected, ignoring error" {
+			continue
+		}
+		found = true
+		break
+	}
+	assert.True(t, found, "expected rows affected error, not found")
 }

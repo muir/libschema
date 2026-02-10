@@ -115,6 +115,16 @@ func TestBadMigrationsPostgres(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:      "rows affected failure on repeat until migration",
+			substring: `no RowsAffected available after the empty statement`,
+			define: func(dbase *libschema.Database) {
+				dbase.Migrations("L9",
+					lspostgres.Script("T4", `CREATE TABLE T1 (id text)`),
+					lspostgres.Script("T5", ` -- just a comment`, libschema.RepeatUntilNoOp()),
+				)
+			},
+		},
 		// Add sentinel-based validation cases (non-idempotent / mixes data & DDL) formerly enforced
 		// (Removed forced non-transactional idempotency and multi-stmt cases; ForceNonTransactional bypass semantics retained elsewhere.)
 	}
