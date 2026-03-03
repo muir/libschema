@@ -15,7 +15,7 @@ const (
 	DialectInvalid Dialect = iota
 	DialectMySQL
 	DialectPostgres
-	DialectSingleStore = DialectMySQL
+	DialectSingleStore
 )
 
 // Flag is a bitmask describing statement / script properties.
@@ -97,6 +97,9 @@ func ClassifyTokens(d Dialect, majorVersion int, sqlString string) (Statements, 
 	case DialectMySQL:
 		// TokenizeMySQL preserves comments/whitespace in tokens
 		tokens = sqltoken.TokenizeMySQL(sqlString)
+	case DialectSingleStore:
+		// TokenizeSingleStore preserves comments/whitespace in tokens
+		tokens = sqltoken.TokenizeSingleStore(sqlString)
 	default:
 		return nil, errors.New("invalid dialect")
 	}
