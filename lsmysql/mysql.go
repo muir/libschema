@@ -51,6 +51,7 @@ type MySQL struct {
 	lock                sync.Mutex
 	trackingSchemaTable func(*libschema.Database) (string, string, string, error)
 	skipDatabase        bool
+	dialect             classifysql.Dialect
 }
 
 // applySchemaOverrideMySQL sets the database (schema) for the current connection/transaction
@@ -86,6 +87,7 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB,
 	m := &MySQL{
 		db:                  db,
 		trackingSchemaTable: trackingSchemaTable,
+		dialect:             classifysql.DialectMySQL,
 	}
 	for _, opt := range options {
 		opt(m)
@@ -258,7 +260,7 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 			if sqlText == "" {
 				return nil
 			}
-			statements, err := classifysql.ClassifyTokens(classifysql.DialectMySQL, 0, sqlText)
+			statements, err := classifysql.ClassifyTokens(p.dialect, 0, sqlText)
 			if err != nil {
 				return errors.Wrap(err, "classify mysql migration")
 			}
@@ -348,6 +350,14 @@ var simpleIdentifierRE = regexp.MustCompile(`\A[A-Za-z][A-Za-z0-9_]*\z`)
 func WithTrackingTableQuoter(f func(*libschema.Database) (schemaName, tableName, simpleTableName string, err error)) MySQLOpt {
 	return func(p *MySQL) {
 		p.trackingSchemaTable = f
+	}
+}
+
+// WithDialect is a somewhat internal function -- used by lssinglestore.
+// It overrides the dialect.
+func WithDialect(dialect classifysql.Dialect) MySQLOpt {
+	return func(p *MySQL) {
+		p.dialect = dialect
 	}
 }
 

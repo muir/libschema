@@ -12,6 +12,7 @@ import (
 	"github.com/memsql/errors"
 
 	"github.com/muir/libschema"
+	"github.com/muir/libschema/classifysql"
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/lsmysql"
 )
@@ -46,6 +47,7 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 	_, mysql, err := lsmysql.New(log, dbName, schema, db,
 		lsmysql.WithoutDatabase,
 		lsmysql.WithTrackingTableQuoter(trackingSchemaTable),
+		lsmysql.WithDialect(classifysql.DialectSingleStore),
 	)
 	if err != nil {
 		return nil, nil, err
