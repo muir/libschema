@@ -8,6 +8,7 @@ import (
 	"github.com/muir/libschema"
 	"github.com/muir/libschema/classifysql"
 	"github.com/muir/libschema/internal"
+	"github.com/muir/sqltoken"
 	"github.com/pkg/errors"
 )
 
@@ -16,7 +17,26 @@ type CanExecContext interface {
 }
 
 func RunSQL(ctx context.Context, log *internal.Log, tx CanExecContext, statements classifysql.Statements, rowsAffected *int64, m libschema.Migration, d *libschema.Database) error {
-	for _, commandSQL := range statements.TokensList().Strings() {
+	for _, tokens := range statements.TokensList() {
+		tokens = tokens.Strip()
+		if len(tokens) == 0 {
+			continue
+		}
+		if tokens[0].Type == sqltoken.DelimiterStatement {
+			log.Debug("Stripping leading delimiter statement from migration", map[string]any{
+				"name":    m.Base().Name.Name,
+				"library": m.Base().Name.Library,
+			})
+			tokens = tokens[1:]
+		}
+		if tokens[len(tokens)-1].Type == sqltoken.DelimiterStatement {
+			log.Debug("Stripping trailing delimiter statement from migration", map[string]any{
+				"name":    m.Base().Name.Name,
+				"library": m.Base().Name.Library,
+			})
+			tokens = tokens[:len(tokens)-1]
+		}
+		commandSQL := tokens.String()
 		result, err := tx.ExecContext(ctx, commandSQL)
 		if d.Options.DebugLogging {
 			log.Debug("Executed SQL", map[string]any{
