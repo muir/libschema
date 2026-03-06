@@ -306,21 +306,18 @@ func testMigrationWithDelimiter(t *testing.T, dsn string, createPostfix string, 
 	dbase.Migrations("L1",
 		lsmysql.Script("SP", `
 DELIMITER //
-CREATE PROCEDURE charge_account(id BIGINT, amount DECIMAL(18,4)) AS
-  DECLARE
-    balance_tbl QUERY(bal DECIMAL(18,4)) =
-      SELECT remaining_balance
-      FROM account_balance
-      WHERE account_id = id;
-    balance DECIMAL(18,4) = SCALAR(balance_tbl);
-    updated_balance DECIMAL(18,4) = balance - amount;
-  BEGIN
-    IF balance > amount THEN
-      UPDATE account_balance
-      SET remaining_balance = updated_balance
-      WHERE account_id = id;
-    END IF;
-  END //
+CREATE PROCEDURE charge_account(IN id BIGINT, IN amount DECIMAL(18,4))
+BEGIN
+  DECLARE balance DECIMAL(18,4);
+  SELECT remaining_balance INTO balance
+  FROM account_balance
+  WHERE account_id = id;
+  IF balance > amount THEN
+    UPDATE account_balance
+    SET remaining_balance = balance - amount
+    WHERE account_id = id;
+  END IF;
+END //
 DELIMITER ;
 `))
 	err = s.Migrate(context.Background())
