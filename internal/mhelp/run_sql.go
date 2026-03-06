@@ -30,6 +30,9 @@ func RunSQL(ctx context.Context, log *internal.Log, tx CanExecContext, statement
 				"library": m.Base().Name.Library,
 			})
 			tokens = tokens[1:]
+			if len(tokens) == 0 {
+				continue
+			}
 		}
 		if tokens[len(tokens)-1].Type == sqltoken.DelimiterStatement {
 			log.Debug("Stripping trailing delimiter statement from migration", map[string]any{
@@ -37,6 +40,9 @@ func RunSQL(ctx context.Context, log *internal.Log, tx CanExecContext, statement
 				"library": m.Base().Name.Library,
 			})
 			tokens = tokens[:len(tokens)-1]
+			if len(tokens) == 0 {
+				continue
+			}
 		}
 		commandSQL := tokens.String()
 		result, err := tx.ExecContext(ctx, commandSQL)
