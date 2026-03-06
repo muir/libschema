@@ -18,7 +18,9 @@ type CanExecContext interface {
 
 func RunSQL(ctx context.Context, log *internal.Log, tx CanExecContext, statements classifysql.Statements, rowsAffected *int64, m libschema.Migration, d *libschema.Database) error {
 	for _, tokens := range statements.TokensList() {
-		tokens = tokens.Strip()
+		if !m.Base().PreserveComments() {
+			tokens = tokens.Strip()
+		}
 		if len(tokens) == 0 {
 			continue
 		}
