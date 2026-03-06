@@ -217,7 +217,8 @@ func TestRowsAffectedErrorLogged(t *testing.T) {
 	require.NoError(t, err)
 	lib := fmt.Sprintf("RA_%d", time.Now().UnixNano())
 	comment := lspostgres.Script("NOTHING",
-		" -- just a comment")
+		" -- just a comment",
+		libschema.PreserveComments())
 	dbase.Migrations(lib, comment)
 	require.NoError(t, s.Migrate(ctx))
 	entries := capLog.Entries()

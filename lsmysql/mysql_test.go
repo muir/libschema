@@ -273,3 +273,53 @@ func testMysqlNotAllowed(t *testing.T, dsn string, createPostfix string, driverN
 		}
 	}
 }
+
+func TestMysqlMigrationWithDelimiter(t *testing.T) {
+	t.Parallel()
+	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
+	}
+	testMigrationWithDelimiter(t, dsn, "ENGINE = InnoDB", mysqlNew)
+}
+
+func testMigrationWithDelimiter(t *testing.T, dsn string, createPostfix string, driverNew driverNew) {
+	options, cleanup := lstesting.FakeSchema(t, "")
+
+	t.Log("Doing migrations in database/schema", options.SchemaOverride)
+
+	t.Log("We will error on unknown migrations")
+
+	options.DebugLogging = true
+	t.Log("No opening the database...")
+	db, err := sql.Open("mysql", dsn)
+	require.NoError(t, err, "open database")
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
+	defer cleanup(db)
+
+	s := libschema.New(context.Background(), options)
+	dbase, _, err := driverNew(t, "test", s, db)
+	require.NoError(t, err, "libschema NewDatabase")
+
+	dbase.Migrations("L1",
+		lsmysql.Script("SP", `
+DELIMITER //
+CREATE PROCEDURE charge_account(IN id BIGINT, IN amount DECIMAL(18,4))
+BEGIN
+  DECLARE balance DECIMAL(18,4);
+  SELECT remaining_balance INTO balance
+  FROM account_balance
+  WHERE account_id = id;
+  IF balance > amount THEN
+    UPDATE account_balance
+    SET remaining_balance = balance - amount
+    WHERE account_id = id;
+  END IF;
+END //
+DELIMITER ;
+`))
+	err = s.Migrate(context.Background())
+	assert.NoError(t, err)
+}

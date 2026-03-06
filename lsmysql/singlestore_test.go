@@ -60,6 +60,15 @@ func TestSingleStoreNotAllowed(t *testing.T) {
 	testMysqlNotAllowed(t, dsn, "", singleStoreNew)
 }
 
+func TestSingleStoreMigrationWithDelimiter(t *testing.T) {
+	t.Parallel()
+	dsn := os.Getenv("LIBSCHEMA_SINGLESTORE_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_SINGLESTORE_TEST_DSN to test SingleStore support in libschema/lsmysql")
+	}
+	testMigrationWithDelimiter(t, dsn, "", singleStoreNew)
+}
+
 func TestSingleStoreFailedMigration(t *testing.T) {
 	t.Parallel()
 	dsn := os.Getenv("LIBSCHEMA_SINGLESTORE_TEST_DSN")
