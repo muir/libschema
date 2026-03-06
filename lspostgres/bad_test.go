@@ -121,7 +121,7 @@ func TestBadMigrationsPostgres(t *testing.T) {
 			define: func(dbase *libschema.Database) {
 				dbase.Migrations("L9",
 					lspostgres.Script("T4", `CREATE TABLE T1 (id text)`),
-					lspostgres.Script("T5", ` -- just a comment`, libschema.RepeatUntilNoOp()),
+					lspostgres.Script("T5", ` -- just a comment`, libschema.RepeatUntilNoOp(), libschema.PreserveComments()),
 				)
 			},
 		},
