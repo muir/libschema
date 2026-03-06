@@ -24,8 +24,10 @@ func RunSQL(ctx context.Context, log *internal.Log, tx CanExecContext, statement
 		if len(tokens) == 0 {
 			continue
 		}
+		// Expected pattern: DelimiterStatement, stuff, Delimiter, optional DelimiterStatement
+		// Strip leading DelimiterStatement
 		if tokens[0].Type == sqltoken.DelimiterStatement {
-			log.Debug("Stripping leading delimiter statement from migration", map[string]any{
+			log.Debug("Stripping leading DelimiterStatement from migration", map[string]any{
 				"name":    m.Base().Name.Name,
 				"library": m.Base().Name.Library,
 			})
@@ -34,8 +36,20 @@ func RunSQL(ctx context.Context, log *internal.Log, tx CanExecContext, statement
 				continue
 			}
 		}
+		// Strip optional trailing DelimiterStatement
 		if tokens[len(tokens)-1].Type == sqltoken.DelimiterStatement {
-			log.Debug("Stripping trailing delimiter statement from migration", map[string]any{
+			log.Debug("Stripping trailing DelimiterStatement from migration", map[string]any{
+				"name":    m.Base().Name.Name,
+				"library": m.Base().Name.Library,
+			})
+			tokens = tokens[:len(tokens)-1]
+			if len(tokens) == 0 {
+				continue
+			}
+		}
+		// Strip trailing Delimiter
+		if tokens[len(tokens)-1].Type == sqltoken.Delimiter {
+			log.Debug("Stripping trailing Delimiter from migration", map[string]any{
 				"name":    m.Base().Name.Name,
 				"library": m.Base().Name.Library,
 			})
