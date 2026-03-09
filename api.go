@@ -74,6 +74,7 @@ type MigrationBase struct {
 	nonTransactional bool  // set automatically or by ForceNonTransactional / inference
 	forcedTx         *bool // if not nil, explicitly chosen transactional mode (true=transactional, false=non-transactional)
 	notes            map[string]any
+	preserveComments bool
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -328,6 +329,17 @@ func ForceTransactional() MigrationOption {
 	}
 }
 
+// PreserveComments prevents stripping of SQL comments before execution.
+// This is primarily useful for testing scenarios where comment-only
+// statements are needed to exercise specific code paths.
+// PreserveComments can break DELIMITER handling so do not use in conjunction
+// with SQL that includes DELIMITERs.
+func PreserveComments() MigrationOption {
+	return func(m Migration) {
+		m.Base().preserveComments = true
+	}
+}
+
 // ApplyForceOverride overrides transactionality for any prior force call (ForceTransactional
 // or ForceNonTransactional)
 func (m *MigrationBase) ApplyForceOverride() {
@@ -415,6 +427,9 @@ func (m *MigrationBase) ForcedTransactional() bool { return m.forcedTx != nil &&
 
 // ForcedNonTransactional reports if ForceNonTransactional() was explicitly called.
 func (m *MigrationBase) ForcedNonTransactional() bool { return m.forcedTx != nil && !*m.forcedTx }
+
+// PreserveComments reports if PreserveComments() was set on this migration.
+func (m *MigrationBase) PreserveComments() bool { return m.preserveComments }
 
 func (n MigrationName) String() string {
 	return n.Library + ": " + n.Name

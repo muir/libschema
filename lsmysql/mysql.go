@@ -255,9 +255,9 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				}
 				sqlText = genSQL
 			}
-			sqlText = strings.TrimSpace(sqlText)
-			m.Base().SetNote("sql", sqlText)
-			if sqlText == "" {
+			trimmedSQLText := strings.TrimSpace(sqlText)
+			m.Base().SetNote("sql", trimmedSQLText)
+			if trimmedSQLText == "" {
 				return nil
 			}
 			statements, err := classifysql.ClassifyTokens(p.dialect, 0, sqlText)
