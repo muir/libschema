@@ -61,12 +61,7 @@ func TestSingleStoreNotAllowed(t *testing.T) {
 }
 
 func TestSingleStoreMigrationWithDelimiter(t *testing.T) {
-	t.Parallel()
-	dsn := os.Getenv("LIBSCHEMA_SINGLESTORE_TEST_DSN")
-	if dsn == "" {
-		t.Skip("Set $LIBSCHEMA_SINGLESTORE_TEST_DSN to test SingleStore support in libschema/lsmysql")
-	}
-	testSingleStoreOneMigration(t, dsn, `
+	testSingleStoreOneMigration(t, `
 DELIMITER //
 CREATE OR REPLACE PROCEDURE test_proc()
 AS
@@ -77,7 +72,12 @@ DELIMITER ;
 `)
 }
 
-func testSingleStoreOneMigration(t *testing.T, dsn string, sqlText string) {
+func testSingleStoreOneMigration(t *testing.T, sqlText string) {
+	t.Parallel()
+	dsn := os.Getenv("LIBSCHEMA_SINGLESTORE_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_SINGLESTORE_TEST_DSN to test SingleStore support in libschema/lsmysql")
+	}
 	testOneMigration(t, dsn, sqlText, singleStoreNew)
 }
 

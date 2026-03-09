@@ -275,12 +275,7 @@ func testMysqlNotAllowed(t *testing.T, dsn string, createPostfix string, driverN
 }
 
 func TestMysqlMigrationWithDelimiter(t *testing.T) {
-	t.Parallel()
-	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
-	if dsn == "" {
-		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
-	}
-	testMysqlOneMigration(t, dsn, `
+	testMysqlOneMigration(t, `
 DELIMITER //
 CREATE PROCEDURE charge_account(IN id BIGINT, IN amount DECIMAL(18,4))
 BEGIN
@@ -298,7 +293,12 @@ DELIMITER ;
 `)
 }
 
-func testMysqlOneMigration(t *testing.T, dsn string, sqlText string) {
+func testMysqlOneMigration(t *testing.T, sqlText string) {
+	t.Parallel()
+	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
+	}
 	testOneMigration(t, dsn, sqlText, mysqlNew)
 }
 
