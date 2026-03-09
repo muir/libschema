@@ -66,7 +66,19 @@ func TestSingleStoreMigrationWithDelimiter(t *testing.T) {
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_SINGLESTORE_TEST_DSN to test SingleStore support in libschema/lsmysql")
 	}
-	testMigrationWithDelimiter(t, dsn, "", singleStoreNew)
+	testSingleStoreOneMigration(t, dsn, `
+DELIMITER //
+CREATE OR REPLACE PROCEDURE test_proc()
+AS
+BEGIN
+  ECHO SELECT 1;
+END //
+DELIMITER ;
+`)
+}
+
+func testSingleStoreOneMigration(t *testing.T, dsn string, sqlText string) {
+	testOneMigration(t, dsn, sqlText, singleStoreNew)
 }
 
 func TestSingleStoreFailedMigration(t *testing.T) {

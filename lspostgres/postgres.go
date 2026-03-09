@@ -219,9 +219,9 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				}
 				scriptSQL = sqlText
 			}
-			scriptSQL = strings.TrimSpace(scriptSQL)
-			m.Base().SetNote("sql", scriptSQL)
-			if scriptSQL == "" {
+			trimmedScriptSQL := strings.TrimSpace(scriptSQL)
+			m.Base().SetNote("sql", trimmedScriptSQL)
+			if trimmedScriptSQL == "" {
 				return nil
 			}
 			// Classification & downgrade via classifysql

@@ -21,42 +21,36 @@ func RunSQL(ctx context.Context, log *internal.Log, tx CanExecContext, statement
 		if !m.Base().PreserveComments() {
 			tokens = tokens.Strip()
 		}
-		if len(tokens) == 0 {
-			continue
-		}
-		// Expected pattern: DelimiterStatement, stuff, Delimiter, optional DelimiterStatement
-		// Strip leading DelimiterStatement
-		if tokens[0].Type == sqltoken.DelimiterStatement {
+		// Strip leading DelimiterStatement (e.g., "DELIMITER //\n")
+		if len(tokens) > 0 && tokens[0].Type == sqltoken.DelimiterStatement {
 			log.Debug("Stripping leading DelimiterStatement from migration", map[string]any{
 				"name":    m.Base().Name.Name,
 				"library": m.Base().Name.Library,
 			})
 			tokens = tokens[1:]
-			if len(tokens) == 0 {
-				continue
-			}
 		}
-		// Strip optional trailing DelimiterStatement
-		if tokens[len(tokens)-1].Type == sqltoken.DelimiterStatement {
-			log.Debug("Stripping trailing DelimiterStatement from migration", map[string]any{
-				"name":    m.Base().Name.Name,
-				"library": m.Base().Name.Library,
-			})
-			tokens = tokens[:len(tokens)-1]
-			if len(tokens) == 0 {
-				continue
+		// Strip trailing DelimiterStatement (e.g., "DELIMITER ;\n") and any whitespace before it
+		for len(tokens) > 0 && (tokens[len(tokens)-1].Type == sqltoken.DelimiterStatement || tokens[len(tokens)-1].Type == sqltoken.Whitespace) {
+			if tokens[len(tokens)-1].Type == sqltoken.DelimiterStatement {
+				log.Debug("Stripping trailing DelimiterStatement from migration", map[string]any{
+					"name":    m.Base().Name.Name,
+					"library": m.Base().Name.Library,
+				})
 			}
+			tokens = tokens[:len(tokens)-1]
 		}
-		// Strip trailing Delimiter
-		if tokens[len(tokens)-1].Type == sqltoken.Delimiter {
-			log.Debug("Stripping trailing Delimiter from migration", map[string]any{
-				"name":    m.Base().Name.Name,
-				"library": m.Base().Name.Library,
-			})
-			tokens = tokens[:len(tokens)-1]
-			if len(tokens) == 0 {
-				continue
+		// Strip trailing Delimiter (e.g., "//") and any whitespace before it
+		for len(tokens) > 0 && (tokens[len(tokens)-1].Type == sqltoken.Delimiter || tokens[len(tokens)-1].Type == sqltoken.Whitespace) {
+			if tokens[len(tokens)-1].Type == sqltoken.Delimiter {
+				log.Debug("Stripping trailing Delimiter from migration", map[string]any{
+					"name":    m.Base().Name.Name,
+					"library": m.Base().Name.Library,
+				})
 			}
+			tokens = tokens[:len(tokens)-1]
+		}
+		if len(tokens) == 0 {
+			continue
 		}
 		commandSQL := tokens.String()
 		result, err := tx.ExecContext(ctx, commandSQL)

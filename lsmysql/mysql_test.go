@@ -280,31 +280,7 @@ func TestMysqlMigrationWithDelimiter(t *testing.T) {
 	if dsn == "" {
 		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
 	}
-	testMigrationWithDelimiter(t, dsn, "ENGINE = InnoDB", mysqlNew)
-}
-
-func testMigrationWithDelimiter(t *testing.T, dsn string, createPostfix string, driverNew driverNew) {
-	options, cleanup := lstesting.FakeSchema(t, "")
-
-	t.Log("Doing migrations in database/schema", options.SchemaOverride)
-
-	t.Log("We will error on unknown migrations")
-
-	options.DebugLogging = true
-	t.Log("No opening the database...")
-	db, err := sql.Open("mysql", dsn)
-	require.NoError(t, err, "open database")
-	defer func() {
-		assert.NoError(t, db.Close())
-	}()
-	defer cleanup(db)
-
-	s := libschema.New(context.Background(), options)
-	dbase, _, err := driverNew(t, "test", s, db)
-	require.NoError(t, err, "libschema NewDatabase")
-
-	dbase.Migrations("L1",
-		lsmysql.Script("SP", `
+	testMysqlOneMigration(t, dsn, `
 DELIMITER //
 CREATE PROCEDURE charge_account(IN id BIGINT, IN amount DECIMAL(18,4))
 BEGIN
@@ -319,7 +295,31 @@ BEGIN
   END IF;
 END //
 DELIMITER ;
-`))
+`)
+}
+
+func testMysqlOneMigration(t *testing.T, dsn string, sqlText string) {
+	testOneMigration(t, dsn, sqlText, mysqlNew)
+}
+
+func testOneMigration(t *testing.T, dsn string, sqlText string, driverNew driverNew) {
+	options, cleanup := lstesting.FakeSchema(t, "")
+
+	t.Log("Doing migrations in database/schema", options.SchemaOverride)
+
+	options.DebugLogging = true
+	db, err := sql.Open("mysql", dsn)
+	require.NoError(t, err, "open database")
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
+	defer cleanup(db)
+
+	s := libschema.New(context.Background(), options)
+	dbase, _, err := driverNew(t, "test", s, db)
+	require.NoError(t, err, "libschema NewDatabase")
+
+	dbase.Migrations("L1", lsmysql.Script("M1", sqlText))
 	err = s.Migrate(context.Background())
 	assert.NoError(t, err)
 }
