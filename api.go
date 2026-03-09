@@ -332,6 +332,8 @@ func ForceTransactional() MigrationOption {
 // PreserveComments prevents stripping of SQL comments before execution.
 // This is primarily useful for testing scenarios where comment-only
 // statements are needed to exercise specific code paths.
+// PreserveComments can break DELIMITER handling so do not use in conjunction
+// with SQL that includes DELIMITERs.
 func PreserveComments() MigrationOption {
 	return func(m Migration) {
 		m.Base().preserveComments = true
