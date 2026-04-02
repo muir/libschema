@@ -267,12 +267,12 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 
 			summary := statements.Summarize()
 			if summary.Includes(classifysql.IsDDL) {
-				if !m.Base().SkipClassification() {
+				if m.Base().ForcedTransactional() {
+					return errors.Errorf("cannot force transactional on MySQL migration %s containing DDL", m.Base().Name)
+				}
+				if !m.Base().SkipClassificationCheck() {
 					if summary.Includes(classifysql.IsDML) {
 						return errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
-					}
-					if m.Base().ForcedTransactional() {
-						return errors.Errorf("cannot force transactional on MySQL migration %s containing DDL", m.Base().Name)
 					}
 					for _, st := range statements {
 						if st.Flags&(classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) == (classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) && !m.Base().HasSkipIf() {
