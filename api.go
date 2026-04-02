@@ -66,7 +66,7 @@ type MigrationBase struct {
 	Name               MigrationName
 	async              bool
 	rawAfter           []MigrationName
-	order              int // overall desired ordring across all libraries, ignores runAfter
+	order              int // overall desired ordering across all libraries, ignores runAfter
 	status             MigrationStatus
 	skipIf             func() (bool, error)
 	skipRemainingIf    func() (bool, error)
@@ -330,7 +330,9 @@ func ForceTransactional() MigrationOption {
 	}
 }
 
-// SkipClassificationCheck overrides checks that prevent checking
+// SkipClassificationCheck bypasses classification-based validation checks that
+// can reject stored procedure/function definitions whose bodies contain DML
+// tokens. It skips DDL/DML-mixing and non-transactional idempotency heuristics.
 func SkipClassificationCheck() MigrationOption {
 	return func(m Migration) {
 		b := m.Base()
@@ -434,8 +436,8 @@ func (m *MigrationBase) SetNonTransactional(v bool) {
 // ForcedTransactional reports if ForceTransactional() was explicitly called.
 func (m *MigrationBase) ForcedTransactional() bool { return m.forcedTx != nil && *m.forcedTx }
 
-// SkipClassification reports if SkipClassificationCheck() was explicitly called.
-func (m *MigrationBase) SkipClassification() bool { return m.skipClassification }
+// SkipClassificationCheck reports if SkipClassificationCheck() was explicitly called.
+func (m *MigrationBase) SkipClassificationCheck() bool { return m.skipClassification }
 
 // ForcedNonTransactional reports if ForceNonTransactional() was explicitly called.
 func (m *MigrationBase) ForcedNonTransactional() bool { return m.forcedTx != nil && !*m.forcedTx }
