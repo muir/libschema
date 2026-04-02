@@ -132,3 +132,43 @@ func TestSkipFunctions(t *testing.T) {
 		assert.NotEqual(t, "override", dbNameReRestored, "un-override")
 	}
 }
+
+// TestSkipClassificationCheck verifies that SkipClassificationCheck allows
+// migrations that mix DDL and DML to succeed. This is needed for stored
+// procedures where the CREATE PROCEDURE (DDL) contains DML statements in
+// the procedure body - the DML is part of the procedure definition, not
+// separate statements being executed.
+func TestSkipClassificationCheck(t *testing.T) {
+	t.Parallel()
+	dsn := os.Getenv("LIBSCHEMA_MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("Set $LIBSCHEMA_MYSQL_TEST_DSN to test libschema/lsmysql")
+	}
+
+	options, cleanup := lstesting.FakeSchema(t, "")
+	options.DebugLogging = true
+	s := libschema.New(context.Background(), options)
+
+	db, err := sql.Open("mysql", dsn)
+	require.NoError(t, err, "open database")
+	defer func() {
+		assert.NoError(t, db.Close())
+	}()
+	defer cleanup(db)
+
+	dbase, _, err := lsmysql.New(libschema.LogFromLog(t), "test", s, db)
+	require.NoError(t, err, "libschema NewDatabase")
+
+	// This migration mixes DDL (CREATE TABLE) and DML (INSERT).
+	// Without SkipClassificationCheck, this would fail with ErrDataAndDDL.
+	// With SkipClassificationCheck, it should succeed.
+	dbase.Migrations("T",
+		lsmysql.Script("create_and_insert", `
+			CREATE TABLE IF NOT EXISTS skip_class_test (id varchar(255) PRIMARY KEY);
+			INSERT INTO skip_class_test (id) VALUES ('test1')`,
+			libschema.SkipClassificationCheck()),
+	)
+
+	err = s.Migrate(context.Background())
+	assert.NoError(t, err, "migration with SkipClassificationCheck should succeed")
+}
