@@ -136,6 +136,19 @@ func TestPostgresNonTxCases(t *testing.T) {
 			},
 		},
 		{
+			name:  "skip_classification_check_needed_for_non_tx_dml",
+			label: "ntx_skip_class",
+			script: func() ([]libschema.Migration, outcome) {
+				setup := lspostgres.Script("T", "CREATE TABLE IF NOT EXISTS st_skip_class_tab (id int)")
+				bad := lspostgres.Script("BAD", "INSERT INTO st_skip_class_tab (id) VALUES (1)", libschema.ForceNonTransactional())
+				ok := lspostgres.Script("OK", "INSERT INTO st_skip_class_tab (id) VALUES (2)", libschema.ForceNonTransactional(), libschema.SkipClassificationCheck())
+				return []libschema.Migration{setup, bad, ok}, outcome{
+					expectErr:   true,
+					errContains: "contains data manipulation language",
+				}
+			},
+		},
+		{
 			name:  "runtime_failure",
 			label: "rfail",
 			script: func() ([]libschema.Migration, outcome) {
@@ -195,6 +208,29 @@ func TestPostgresNonTxCases(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPostgresSkipClassificationCheckAllowsNonTxDML(t *testing.T) {
+	db := openPGNonTx(t)
+	ops, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	defer cleanup(db)
+	_, err := db.Exec("CREATE SCHEMA " + ops.SchemaOverride)
+	require.NoError(t, err)
+	s := libschema.New(context.Background(), ops)
+	log := libschema.LogFromLog(t)
+	dbase, err := lspostgres.New(log, "ntx_skip_success", s, db)
+	require.NoError(t, err)
+	dbase.Migrations("NTX_SKIP_SUCCESS",
+		lspostgres.Script("T", "CREATE TABLE IF NOT EXISTS ntx_skip_ok (id int)"),
+		lspostgres.Script("I", "INSERT INTO ntx_skip_ok (id) VALUES (3)",
+			libschema.ForceNonTransactional(),
+			libschema.SkipClassificationCheck()),
+	)
+	require.NoError(t, s.Migrate(context.Background()))
+	row := db.QueryRow("SELECT count(*) FROM "+ops.SchemaOverride+".ntx_skip_ok WHERE id = 3")
+	var count int
+	require.NoError(t, row.Scan(&count))
+	assert.Equal(t, 1, count)
 }
 
 func TestRowsAffectedErrorLogged(t *testing.T) {
