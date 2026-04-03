@@ -63,18 +63,19 @@ type MigrationOption func(Migration)
 
 // Migration defines a single database defintion update.
 type MigrationBase struct {
-	Name             MigrationName
-	async            bool
-	rawAfter         []MigrationName
-	order            int // overall desired ordring across all libraries, ignores runAfter
-	status           MigrationStatus
-	skipIf           func() (bool, error)
-	skipRemainingIf  func() (bool, error)
-	repeatUntilNoOp  bool
-	nonTransactional bool  // set automatically or by ForceNonTransactional / inference
-	forcedTx         *bool // if not nil, explicitly chosen transactional mode (true=transactional, false=non-transactional)
-	notes            map[string]any
-	preserveComments bool
+	Name               MigrationName
+	async              bool
+	rawAfter           []MigrationName
+	order              int // overall desired ordering across all libraries, ignores runAfter
+	status             MigrationStatus
+	skipIf             func() (bool, error)
+	skipRemainingIf    func() (bool, error)
+	repeatUntilNoOp    bool
+	nonTransactional   bool  // set automatically or by ForceNonTransactional / inference
+	forcedTx           *bool // if not nil, explicitly chosen transactional mode (true=transactional, false=non-transactional)
+	notes              map[string]any
+	preserveComments   bool
+	skipClassification bool
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -329,6 +330,16 @@ func ForceTransactional() MigrationOption {
 	}
 }
 
+// SkipClassificationCheck bypasses classification-based validation checks that
+// can reject stored procedure/function definitions whose bodies contain DML
+// tokens. It skips DDL/DML-mixing and non-transactional idempotency heuristics.
+func SkipClassificationCheck() MigrationOption {
+	return func(m Migration) {
+		b := m.Base()
+		b.skipClassification = true
+	}
+}
+
 // PreserveComments prevents stripping of SQL comments before execution.
 // This is primarily useful for testing scenarios where comment-only
 // statements are needed to exercise specific code paths.
@@ -424,6 +435,9 @@ func (m *MigrationBase) SetNonTransactional(v bool) {
 
 // ForcedTransactional reports if ForceTransactional() was explicitly called.
 func (m *MigrationBase) ForcedTransactional() bool { return m.forcedTx != nil && *m.forcedTx }
+
+// SkipClassificationCheck reports if SkipClassificationCheck() was explicitly called.
+func (m *MigrationBase) SkipClassificationCheck() bool { return m.skipClassification }
 
 // ForcedNonTransactional reports if ForceNonTransactional() was explicitly called.
 func (m *MigrationBase) ForcedNonTransactional() bool { return m.forcedTx != nil && !*m.forcedTx }
