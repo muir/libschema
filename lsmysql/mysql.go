@@ -267,20 +267,22 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 
 			summary := statements.Summarize()
 			if summary.Includes(classifysql.IsDDL) {
-				if summary.Includes(classifysql.IsDML) {
-					return errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
-				}
 				if m.Base().ForcedTransactional() {
 					return errors.Errorf("cannot force transactional on MySQL migration %s containing DDL", m.Base().Name)
 				}
+				if !m.Base().SkipClassificationCheck() {
+					if summary.Includes(classifysql.IsDML) {
+						return errors.Errorf("mixed DDL and DML: %w", libschema.ErrDataAndDDL)
+					}
+					for _, st := range statements {
+						if st.Flags&(classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) == (classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) && !m.Base().HasSkipIf() {
+							text := st.Tokens.Strip().String()
+							return errors.Errorf("non-idempotent DDL '%s': %w", text, libschema.ErrNonIdempotentDDL)
+						}
+					}
+				}
 				if !m.Base().NonTransactional() {
 					pm.SetNonTransactional(true)
-				}
-				for _, st := range statements {
-					if st.Flags&(classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) == (classifysql.IsEasilyIdempotentFix|classifysql.IsNonIdempotent) && !m.Base().HasSkipIf() {
-						text := st.Tokens.Strip().String()
-						return errors.Errorf("non-idempotent DDL '%s': %w", text, libschema.ErrNonIdempotentDDL)
-					}
 				}
 			}
 
