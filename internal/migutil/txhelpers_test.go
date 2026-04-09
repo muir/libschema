@@ -11,7 +11,7 @@ import (
 
 func TestCheckNonIdempotentDDLFix(t *testing.T) {
 	mk := func(flags classifysql.Flag, text string) []classifysql.Statement {
-		return []classifysql.Statement{{Flags: flags, Tokens: sqltoken.TokenizeMySQL(text)}}
+		return []classifysql.Statement{{Flags: flags, Tokens: sqltoken.TokenizeMySQLAPI(text)}}
 	}
 	// DDL + NonIdempotent + EasyFix without SkipIf should error
 	err := CheckNonIdempotentDDLFix("M1", false, mk(classifysql.IsDDL|classifysql.IsNonIdempotent|classifysql.IsEasilyIdempotentFix, "CREATE TABLE x (id int)"))

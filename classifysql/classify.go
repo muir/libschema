@@ -95,11 +95,13 @@ func ClassifyTokens(d Dialect, majorVersion int, sqlString string) (Statements, 
 		// TokenizePostgreSQL preserves comments/whitespace in tokens
 		tokens = sqltoken.TokenizePostgreSQL(sqlString)
 	case DialectMySQL:
-		// TokenizeMySQL preserves comments/whitespace in tokens
-		tokens = sqltoken.TokenizeMySQL(sqlString)
+		// TokenizeMySQLAPI preserves comments/whitespace in tokens and tracks BEGIN/END
+		// blocks (driver/API use case, no DELIMITER statement parsing).
+		tokens = sqltoken.TokenizeMySQLAPI(sqlString)
 	case DialectSingleStore:
-		// TokenizeSingleStore preserves comments/whitespace in tokens
-		tokens = sqltoken.TokenizeSingleStore(sqlString)
+		// TokenizeSingleStoreAPI preserves comments/whitespace in tokens and tracks BEGIN/END
+		// blocks (driver/API use case, no DELIMITER statement parsing).
+		tokens = sqltoken.TokenizeSingleStoreAPI(sqlString)
 	default:
 		return nil, errors.New("invalid dialect")
 	}
