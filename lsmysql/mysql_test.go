@@ -274,9 +274,8 @@ func testMysqlNotAllowed(t *testing.T, dsn string, createPostfix string, driverN
 	}
 }
 
-func TestMysqlMigrationWithDelimiter(t *testing.T) {
+func TestMysqlMigrationProcedureBody(t *testing.T) {
 	testMysqlOneMigration(t, `
-DELIMITER //
 CREATE PROCEDURE charge_account(IN id BIGINT, IN amount DECIMAL(18,4))
 BEGIN
   DECLARE balance DECIMAL(18,4);
@@ -288,8 +287,7 @@ BEGIN
     SET remaining_balance = balance - amount
     WHERE account_id = id;
   END IF;
-END //
-DELIMITER ;
+END;
 `)
 }
 

@@ -60,15 +60,13 @@ func TestSingleStoreNotAllowed(t *testing.T) {
 	testMysqlNotAllowed(t, dsn, "", singleStoreNew)
 }
 
-func TestSingleStoreMigrationWithDelimiter(t *testing.T) {
+func TestSingleStoreMigrationProcedureBody(t *testing.T) {
 	testSingleStoreOneMigration(t, `
-DELIMITER //
 CREATE OR REPLACE PROCEDURE test_proc()
 AS
 BEGIN
   ECHO SELECT 1;
-END //
-DELIMITER ;
+END;
 `)
 }
 
