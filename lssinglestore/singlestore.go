@@ -15,6 +15,7 @@ import (
 	"github.com/muir/libschema/classifysql"
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/lsmysql"
+	"github.com/muir/sqltoken"
 )
 
 // SingleStore is a libschema.Driver for connecting to SingleStore databases.
@@ -77,6 +78,12 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
 	// Delegates to MySQL implementation which now applies ApplyForceOverride early.
 	return lsmysql.Script(name, sqlText, opts...)
+}
+
+// PreTokenized defines a migration from caller-provided pre-split statement tokens.
+// Statement boundaries are preserved exactly as provided (one Tokens per statement).
+func PreTokenized(name string, split sqltoken.TokensList, opts ...libschema.MigrationOption) libschema.Migration {
+	return lsmysql.PreTokenized(name, split, opts...)
 }
 
 // Generate registers a callback that returns a migration in a string.
