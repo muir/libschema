@@ -105,7 +105,20 @@ func ClassifyTokens(d Dialect, majorVersion int, sqlString string) (Statements, 
 	default:
 		return nil, errors.New("invalid dialect")
 	}
-	split := tokens.CmdSplitUnstripped()
+	return ClassifyPreSplit(d, majorVersion, tokens.CmdSplitUnstripped())
+}
+
+// ClassifyPreSplit classifies already tokenized/split statements, preserving caller-provided boundaries.
+// split should contain unstripped statement tokens (like CmdSplitUnstripped output).
+func ClassifyPreSplit(d Dialect, majorVersion int, split sqltoken.TokensList) (Statements, error) {
+	switch d {
+	case DialectPostgres, DialectMySQL, DialectSingleStore:
+	default:
+		return nil, errors.New("invalid dialect")
+	}
+	if len(split) == 0 {
+		return nil, nil
+	}
 	stmts := make(Statements, len(split))
 	for i, raw := range split {
 		stmts[i].Tokens = raw

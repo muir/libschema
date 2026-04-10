@@ -18,6 +18,7 @@ import (
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/internal/mhelp"
 	"github.com/muir/libschema/internal/migfinalize"
+	"github.com/muir/sqltoken"
 )
 
 // Postgres is a libschema.Driver for connecting to Postgres-like databases that
@@ -43,7 +44,8 @@ type ConnPtr interface{ *sql.Tx | *sql.DB | *sql.Conn }
 
 type pmigration struct {
 	libschema.MigrationBase
-	scriptSQL string
+	scriptSQL   string
+	preSplitSQL sqltoken.TokensList
 	// genFn always uses the (string, error) internal form.
 	genFn        func(context.Context, *sql.Tx) (string, error)
 	computedTx   func(context.Context, *sql.Tx) error
@@ -65,6 +67,7 @@ func applySchemaOverridePostgres(ctx context.Context, tx mhelp.CanExecContext, o
 func (m *pmigration) Copy() libschema.Migration {
 	n := *m
 	n.MigrationBase = m.MigrationBase.Copy()
+	n.preSplitSQL = m.preSplitSQL.Copy()
 	return &n
 }
 
@@ -81,6 +84,20 @@ func (m *pmigration) Base() *libschema.MigrationBase {
 // ForceNonTransactional() or ForceTransactional() options.
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
 	pm := &pmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, scriptSQL: sqlText}
+	m := libschema.Migration(pm)
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// PreTokenized defines a migration from caller-provided pre-split statement tokens.
+// Statement boundaries are preserved exactly as provided (one Tokens per statement).
+func PreTokenized(name string, split sqltoken.TokensList, opts ...libschema.MigrationOption) libschema.Migration {
+	pm := &pmigration{
+		MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}},
+		preSplitSQL:   split.Copy(),
+	}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(m)
@@ -210,24 +227,33 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 				}
 				return errors.Wrapf(pm.computedConn(ctx, conn), "callback %s", m.Base().Name)
 			}
-			// Script / Generate path
-			scriptSQL := pm.scriptSQL
-			if pm.genFn != nil {
-				sqlText, err := pm.genFn(ctx, tx)
+			var statements classifysql.Statements
+			var err error
+			if len(pm.preSplitSQL) > 0 {
+				m.Base().SetNote("sql", pm.preSplitSQL.Join().String())
+				statements, err = classifysql.ClassifyPreSplit(classifysql.DialectPostgres, p.serverMajor, pm.preSplitSQL)
 				if err != nil {
-					return errors.WithStack(err)
+					return errors.Wrap(err, "classify postgres pre-tokenized migration")
 				}
-				scriptSQL = sqlText
-			}
-			trimmedScriptSQL := strings.TrimSpace(scriptSQL)
-			m.Base().SetNote("sql", trimmedScriptSQL)
-			if trimmedScriptSQL == "" {
-				return nil
-			}
-			// Classification & downgrade via classifysql
-			statements, err := classifysql.ClassifyTokens(classifysql.DialectPostgres, p.serverMajor, scriptSQL)
-			if err != nil {
-				return errors.Wrap(err, "classify postgres migration")
+			} else {
+				// Script / Generate path
+				scriptSQL := pm.scriptSQL
+				if pm.genFn != nil {
+					sqlText, err := pm.genFn(ctx, tx)
+					if err != nil {
+						return errors.WithStack(err)
+					}
+					scriptSQL = sqlText
+				}
+				trimmedScriptSQL := strings.TrimSpace(scriptSQL)
+				if trimmedScriptSQL == "" {
+					return nil
+				}
+				m.Base().SetNote("sql", trimmedScriptSQL)
+				statements, err = classifysql.ClassifyTokens(classifysql.DialectPostgres, p.serverMajor, scriptSQL)
+				if err != nil {
+					return errors.Wrap(err, "classify postgres migration")
+				}
 			}
 			// Determine if transactional of not (if not already known)
 			if !pm.Base().ForcedTransactional() && !pm.Base().NonTransactional() {
