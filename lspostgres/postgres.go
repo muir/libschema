@@ -498,7 +498,7 @@ func (p *Postgres) IsMigrationSupported(d *libschema.Database, _ *internal.Log, 
 	if !ok {
 		return errors.Errorf("non-postgres migration %s registered with postgres migrations", migration.Base().Name)
 	}
-	if m.genFn != nil || m.computedTx != nil || m.computedDB != nil || m.scriptSQL != "" || m.computedConn != nil {
+	if m.genFn != nil || m.computedTx != nil || m.computedDB != nil || m.scriptSQL != "" || m.computedConn != nil || len(m.preSplitSQL) > 0 {
 		return nil
 	}
 	return errors.Errorf("migration %s is not supported", migration.Base().Name)
