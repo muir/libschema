@@ -16,6 +16,7 @@ import (
 	"github.com/muir/libschema/internal"
 	"github.com/muir/libschema/internal/mhelp"
 	"github.com/muir/libschema/internal/migfinalize"
+	"github.com/muir/sqltoken"
 )
 
 // MySQL is a libschema.Driver for connecting to MySQL-like databases that
@@ -107,6 +108,7 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB,
 type mmigration struct {
 	libschema.MigrationBase
 	scriptSQL    string
+	preSplitSQL  sqltoken.TokensList
 	genFn        func(context.Context, *sql.Tx) (string, error)
 	computedTx   func(context.Context, *sql.Tx) error
 	computedDB   func(context.Context, *sql.DB) error
@@ -116,6 +118,7 @@ type mmigration struct {
 func (m *mmigration) Copy() libschema.Migration {
 	n := *m
 	n.MigrationBase = m.MigrationBase.Copy()
+	n.preSplitSQL = m.preSplitSQL.Copy()
 	return &n
 }
 func (m *mmigration) Base() *libschema.MigrationBase { return &m.MigrationBase }
@@ -130,6 +133,20 @@ func (m *mmigration) Base() *libschema.MigrationBase { return &m.MigrationBase }
 func Script(name string, sqlText string, opts ...libschema.MigrationOption) libschema.Migration {
 	// Classification and validation are deferred to execution; here we only store raw SQL and options.
 	pm := &mmigration{MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}}, scriptSQL: sqlText}
+	m := libschema.Migration(pm)
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// PreTokenized defines a migration from caller-provided pre-split statement tokens.
+// Statement boundaries are preserved exactly as provided (one Tokens per statement).
+func PreTokenized(name string, split sqltoken.TokensList, opts ...libschema.MigrationOption) libschema.Migration {
+	pm := &mmigration{
+		MigrationBase: libschema.MigrationBase{Name: libschema.MigrationName{Name: name}},
+		preSplitSQL:   split.Copy(),
+	}
 	m := libschema.Migration(pm)
 	for _, opt := range opts {
 		opt(m)
@@ -246,23 +263,33 @@ func (p *MySQL) DoOneMigration(ctx context.Context, log *internal.Log, d *libsch
 				}
 				return errors.WithStack(pm.computedConn(ctx, conn))
 			}
-			// Script or Generate path
-			sqlText := pm.scriptSQL
-			if pm.genFn != nil {
-				genSQL, gerr := pm.genFn(ctx, tx)
-				if gerr != nil {
-					return errors.WithStack(gerr)
+			var statements classifysql.Statements
+			var err error
+			if len(pm.preSplitSQL) > 0 {
+				m.Base().SetNote("sql", pm.preSplitSQL.Join().String())
+				statements, err = classifysql.ClassifyPreSplit(p.dialect, 0, pm.preSplitSQL)
+				if err != nil {
+					return errors.Wrap(err, "classify mysql pre-tokenized migration")
 				}
-				sqlText = genSQL
-			}
-			trimmedSQLText := strings.TrimSpace(sqlText)
-			m.Base().SetNote("sql", trimmedSQLText)
-			if trimmedSQLText == "" {
-				return nil
-			}
-			statements, err := classifysql.ClassifyTokens(p.dialect, 0, sqlText)
-			if err != nil {
-				return errors.Wrap(err, "classify mysql migration")
+			} else {
+				// Script or Generate path
+				sqlText := pm.scriptSQL
+				if pm.genFn != nil {
+					genSQL, gerr := pm.genFn(ctx, tx)
+					if gerr != nil {
+						return errors.WithStack(gerr)
+					}
+					sqlText = genSQL
+				}
+				trimmedSQLText := strings.TrimSpace(sqlText)
+				m.Base().SetNote("sql", trimmedSQLText)
+				if trimmedSQLText == "" {
+					return nil
+				}
+				statements, err = classifysql.ClassifyTokens(p.dialect, 0, sqlText)
+				if err != nil {
+					return errors.Wrap(err, "classify mysql migration")
+				}
 			}
 
 			summary := statements.Summarize()
