@@ -40,6 +40,15 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 	return schema.NewDatabase(log, dbName, db, &Postgres{log: log})
 }
 
+// NewWithOpener creates a libschema.Database with a postgres driver built in.  The dbName
+// parameter is used internally by libschema, but does not affect where migrations
+// are actually applied.
+//
+// It is the caller's responsibility to eventually call database.DB().Close()
+func NewWithOpener(log *internal.Log, dbName string, schema *libschema.Schema, opener func() (*sql.DB, error)) (*libschema.Database, error) {
+	return schema.NewDatabaseWithOpener(log, dbName, opener, &Postgres{log: log})
+}
+
 type ConnPtr interface{ *sql.Tx | *sql.DB | *sql.Conn }
 
 type pmigration struct {

@@ -40,31 +40,55 @@ type SingleStore struct {
 	*lsmysql.MySQL
 	lockTx *sql.Tx
 	lock   sync.Mutex
-	db     *sql.DB
 }
 
 // New creates a libschema.Database with a Singlestore driver built in.
 func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB) (*libschema.Database, *SingleStore, error) {
-	_, mysql, err := lsmysql.New(log, dbName, schema, db,
-		lsmysql.WithoutDatabase,
+	return newMaybeWithOpener(log, dbName, schema, db, nil)
+}
+
+// NewWithOpener creates a libschema.Database with a Singlestore driver built in.
+//
+// It is the caller's responsibility to eventually call either database.DB().Close()
+// or singlestore.DB().Close()
+func NewWithOpener(log *internal.Log, dbName string, schema *libschema.Schema, opener func() (*sql.DB, error)) (*libschema.Database, *SingleStore, error) {
+	return newMaybeWithOpener(log, dbName, schema, nil, opener)
+}
+
+func newMaybeWithOpener(log *internal.Log, dbName string, schema *libschema.Schema, optDB *sql.DB, optOpener func() (*sql.DB, error)) (*libschema.Database, *SingleStore, error) {
+	s2 := &SingleStore{}
+	var database *libschema.Database
+	var err error
+	if optDB != nil {
+		database, err = schema.NewDatabase(log, dbName, optDB, s2)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		database, err = schema.NewDatabaseWithOpener(log, dbName, optOpener, s2)
+		if err != nil {
+			if database != nil {
+				db := database.DB()
+				if db != nil {
+					_ = db.Close()
+				}
+			}
+			return nil, nil, err
+		}
+	}
+	opts := []lsmysql.MySQLOpt{
+		lsmysql.WithDatabase(database),
 		lsmysql.WithTrackingTableQuoter(trackingSchemaTable),
 		lsmysql.WithDialect(classifysql.DialectSingleStore),
-	)
+	}
+	_, mysql, err := lsmysql.New(log, dbName, schema, nil, opts...)
 	if err != nil {
+		if optDB == nil {
+			_ = database.DB().Close()
+		}
 		return nil, nil, err
 	}
-	s2 := &SingleStore{
-		MySQL: mysql,
-		db:    db,
-	}
-	database, err := schema.NewDatabase(log, dbName, db, s2)
-	if err != nil {
-		return nil, nil, err
-	}
-	if database.Options.SchemaOverride != "" {
-		//nolint:staticcheck // QF1008: could remove embedded field "MySQL" from selector
-		s2.MySQL.UseDatabase(database.Options.SchemaOverride)
-	}
+	s2.MySQL = mysql
 	return database, s2, nil
 }
 
@@ -247,7 +271,7 @@ func (p *SingleStore) GetTableConstraint(table, constraintName string) (string, 
 		return "", false, err
 	}
 	var typ *string
-	err = p.db.QueryRow(`
+	err = p.DB().QueryRow(`
 		SELECT	constraint_type
 		FROM	information_schema.table_constraints
 		WHERE	constraint_schema = ?
