@@ -34,6 +34,7 @@ func TestSingleStoreSkipFunctions(t *testing.T) {
 
 	dbase, m, err := lssinglestore.New(libschema.LogFromLog(t), "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")
+	require.NotNil(t, dbase)
 
 	dbase.Migrations("T",
 		lssinglestore.Script("setup1", `

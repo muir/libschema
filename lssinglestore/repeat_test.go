@@ -32,6 +32,7 @@ func TestRepeat(t *testing.T) {
 	log := libschema.LogFromLog(t)
 	dbase, _, err := lssinglestore.New(log, "test", s, db)
 	require.NoError(t, err)
+	require.NotNil(t, dbase)
 
 	dbase.Migrations("L1",
 		lssinglestore.Script("M1", `CREATE TABLE IF NOT EXISTS m1 (id text)`),

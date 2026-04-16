@@ -35,6 +35,7 @@ func TestComputedInference(t *testing.T) {
 	log := libschema.LogFromLog(t)
 	dbase, _, err := lssinglestore.New(log, "test", s, db)
 	require.NoError(t, err)
+	require.NotNil(t, dbase)
 
 	calledTx := false
 	calledDB := false
@@ -58,6 +59,7 @@ func TestForceOverride(t *testing.T) {
 	log := libschema.LogFromLog(t)
 	dbase, _, err := lssinglestore.New(log, "test", s, db)
 	require.NoError(t, err)
+	require.NotNil(t, dbase)
 
 	forcedTx := lssinglestore.Script("FORCE_TX", "SELECT 1", libschema.ForceTransactional())
 	forcedNonTx := lssinglestore.Script("FORCE_NONTX", "SELECT 1", libschema.ForceNonTransactional())

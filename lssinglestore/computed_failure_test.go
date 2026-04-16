@@ -30,6 +30,7 @@ func TestComputedFailure(t *testing.T) {
 	log := libschema.LogFromLog(t)
 	dbase, _, err := New(log, "test_singlestore_fail", s, db)
 	require.NoError(t, err)
+	require.NotNil(t, dbase)
 
 	lib := time.Now().Format("FAIL_20060102150405.000000000")
 	failErr := errors.New("boom-fail-singlestore")

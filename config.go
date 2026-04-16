@@ -18,6 +18,7 @@ type OverrideOptions struct {
 
 	// MigrateDSN overrides the data source name for a single database.  It must be used in
 	// conjunction with MigrateDatabase unless there are only migrations for a single database.
+	// MigrateDSN is not compatible with ReconnectAfter migrations.
 	MigrateDSN string `flag:"migrate-dsn" help:"Override *sql.DB, must combine with --migrate-database"`
 
 	// NoMigrate command line flag / config variable skips all migrations

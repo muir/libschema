@@ -120,10 +120,14 @@ func (d *Database) prepare(ctx context.Context) error {
 		return err
 	}
 
+	if d.migrationsLocked {
+		return errors.Errorf("migrations already locked by this Database")
+	}
 	err = d.driver.LockMigrationsTable(ctx, d.log, d)
 	if err != nil {
 		return err
 	}
+	d.migrationsLocked = true
 
 	d.unknownMigrations, err = d.driver.LoadStatus(ctx, d.log, d)
 	if err != nil {
@@ -250,6 +254,19 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			"name":     m.Base().Name.Name,
 		})
 	}
+	if m.Base().ReconnectAfter() && !d.CanReconnect() {
+		err := errors.Errorf("reconnect-after required for migration %s but database not created with that capability", m.Base().Name)
+		d.log.Info(" migration not supported", map[string]any{
+			"database": d.DBName,
+			"library":  m.Base().Name.Library,
+			"name":     m.Base().Name.Name,
+			"error":    err.Error(),
+		})
+		m.Base().SetNote("applied", false)
+		m.Base().SetNote("reason", "not supported")
+		m.Base().SetNote("error", err)
+		return false, err
+	}
 	if err := d.driver.IsMigrationSupported(d, d.log, m); err != nil {
 		d.log.Info(" migration not supported", map[string]any{
 			"database": d.DBName,
@@ -316,11 +333,11 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			return false, errors.Wrapf(err, "migration %s in library %s failed", m.Base().Name.Name, m.Base().Name.Library)
 		}
 
-		if m.Base().repeatUntilNoOp && err == nil {
+		if m.Base().repeatUntilNoOp {
 			totalRowsModified += rowsAffected
 			m.Base().SetNote("rows_modified", totalRowsModified)
 			if rowsAffected == 0 {
-				return false, nil
+				break
 			}
 			repeatCount++
 			m.Base().SetNote("repeat_count", repeatCount)
@@ -330,8 +347,15 @@ func (d *Database) doOneMigration(ctx context.Context, m Migration) (bool, error
 			})
 			continue
 		}
-		return false, nil
+		break
 	}
+	if m.Base().ReconnectAfter() {
+		err := d.Reconnect(ctx)
+		if err != nil {
+			return true, errors.Wrapf(err, "reconnect after completing migration %s", m.Base().Name.Name)
+		}
+	}
+	return false, nil
 }
 
 func (d *Database) lastUnfinishedSynchrnous() int {
@@ -402,7 +426,64 @@ func (d *Database) asyncMigrate(ctx context.Context) {
 
 func (d *Database) unlock() error {
 	if !d.asyncInProgress {
-		return d.driver.UnlockMigrationsTable(d.log)
+		if d.migrationsLocked {
+			err := d.driver.UnlockMigrationsTable(d.log)
+			if err != nil {
+				return err
+			}
+			d.migrationsLocked = false
+		}
+	}
+	return nil
+}
+
+func (d *Database) CanReconnect() bool {
+	if d.Options.Overrides != nil && d.Options.Overrides.MigrateDSN != "" {
+		return false
+	}
+	return d.reconnect != nil
+}
+
+func (d *Database) Reconnect(ctx context.Context) (err error) {
+	if !d.CanReconnect() {
+		return errors.Errorf("reconnect not supported")
+	}
+	db, err := d.reconnect()
+	if err != nil {
+		return errors.Wrap(err, "reconnect to database")
+	}
+	defer func() {
+		if err != nil && db != nil {
+			_ = db.Close()
+		}
+	}()
+	relock := d.migrationsLocked
+	if d.db != nil {
+		if d.migrationsLocked {
+			// Drop lock using old db
+			err := d.driver.UnlockMigrationsTable(d.log)
+			if err != nil {
+				return err
+			}
+			d.migrationsLocked = false
+		}
+		err = d.db.Close()
+		if err != nil {
+			return errors.Wrap(err, "close prior database")
+		}
+	}
+	d.db = db
+	db = nil // no longer try to close
+	if relock {
+		err = d.driver.LockMigrationsTable(ctx, d.log, d)
+		if err != nil {
+			return err
+		}
+		d.migrationsLocked = true
+		d.unknownMigrations, err = d.driver.LoadStatus(ctx, d.log, d)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
