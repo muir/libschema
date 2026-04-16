@@ -15,7 +15,7 @@ func (p *MySQL) ColumnDefault(table, column string) (*string, error) {
 		return nil, err
 	}
 	var dflt *string
-	err = p.db.QueryRow(`
+	err = p.DB().QueryRow(`
 		SELECT	column_default
 		FROM	information_schema.columns
 		WHERE	table_schema = ?
@@ -33,7 +33,7 @@ func (p *MySQL) HasPrimaryKey(table string) (bool, error) {
 		return false, err
 	}
 	var count int
-	err = p.db.QueryRow(`
+	err = p.DB().QueryRow(`
 		SELECT	COUNT(*)
 		FROM	information_schema.columns
 		WHERE	table_schema = ?
@@ -51,7 +51,7 @@ func (p *MySQL) ColumnIsInPrimaryKey(table string, column string) (bool, error) 
 		return false, err
 	}
 	var count int
-	err = p.db.QueryRow(`
+	err = p.DB().QueryRow(`
 		SELECT	COUNT(*)
 		FROM	information_schema.columns
 		WHERE	table_schema = ?
@@ -71,7 +71,7 @@ func (p *MySQL) TableHasIndex(table, indexName string) (bool, error) {
 		return false, err
 	}
 	var count int
-	err = p.db.QueryRow(`
+	err = p.DB().QueryRow(`
 		SELECT	COUNT(*)
 		FROM	information_schema.statistics
 		WHERE	table_schema = ?
@@ -89,7 +89,7 @@ func (p *MySQL) DoesColumnExist(table, column string) (bool, error) {
 		return false, err
 	}
 	var count int
-	err = p.db.QueryRow(`
+	err = p.DB().QueryRow(`
 		SELECT	COUNT(*)
 		FROM	information_schema.columns
 		WHERE	table_schema = ?
@@ -108,7 +108,7 @@ func (p *MySQL) GetTableConstraint(table, constraintName string) (string, bool, 
 	}
 	var typ *string
 	var enforced *string
-	err = p.db.QueryRow(`
+	err = p.DB().QueryRow(`
 		SELECT	constraint_type, enforced
 		FROM	information_schema.table_constraints
 		WHERE	constraint_schema = ?
@@ -124,14 +124,14 @@ func (p *MySQL) GetTableConstraint(table, constraintName string) (string, bool, 
 // DatabaseName returns the name of the current database (aka schema for MySQL).
 // A call to UseDatabase() overrides all future calls to DatabaseName().  If the
 // MySQL object was created from a libschema.Schema that had SchemaOverride set
-// then this will return whatever that value was.  It is reccomened that
+// then this will return whatever that value was.  It is recommended that
 // UseDatabase() be called to make sure that the right database is returned.
-func (m *MySQL) DatabaseName() (string, error) {
-	if m.databaseName != "" {
-		return m.databaseName, nil
+func (p *MySQL) DatabaseName() (string, error) {
+	if p.databaseName != "" {
+		return p.databaseName, nil
 	}
 	var database string
-	err := m.db.QueryRow(`SELECT DATABASE()`).Scan(&database)
+	err := p.DB().QueryRow(`SELECT DATABASE()`).Scan(&database)
 	return database, errors.Wrap(err, "select database()")
 }
 

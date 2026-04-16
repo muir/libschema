@@ -31,6 +31,7 @@ func TestEmptyScriptNoOp(t *testing.T) {
 	log := libschema.LogFromLog(t)
 	dbase, _, err := lssinglestore.New(log, "test", s, db)
 	require.NoError(t, err)
+	require.NotNil(t, dbase)
 
 	dbase.Migrations("L1",
 		lssinglestore.Script("EMPTY", ""),

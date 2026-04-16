@@ -45,10 +45,15 @@ type Driver interface {
 	// IsMigrationSupported exists to guard against additional migration
 	// options and features.  It should return nil except if there are new
 	// migration features added that haven't been included in all support
-	// libraries.
+	// libraries. IsMigrationSupported does not need to check if the migration
+	// requires ReconnectAfter
 	IsMigrationSupported(*Database, *internal.Log, Migration) error
 
-	LoadStatus(context.Context, *internal.Log, *Database) ([]MigrationName, error)
+	// LoadStatus loads the current status of all migrations from the migration tracking table.
+	// It modifies the migrations that have been defined to note their status.
+	// It returns the names of any unknown migrations, that exist in the status table,
+	// but haven't been defined.
+	LoadStatus(context.Context, *internal.Log, *Database) (unknownMigrations []MigrationName, _ error)
 }
 
 // MigrationName holds both the name of the specific migration and the library to
@@ -76,6 +81,7 @@ type MigrationBase struct {
 	notes              map[string]any
 	preserveComments   bool
 	skipClassification bool
+	reconnectAfter     bool
 }
 
 func (m MigrationBase) Copy() MigrationBase {
@@ -114,6 +120,7 @@ type Database struct {
 	migrationIndex    map[MigrationName]Migration
 	errors            []error
 	db                *sql.DB
+	reconnect         func() (*sql.DB, error)
 	DBName            string
 	driver            Driver
 	sequence          []Migration // in order of execution
@@ -123,6 +130,7 @@ type Database struct {
 	log               *internal.Log
 	asyncInProgress   bool
 	unknownMigrations []MigrationName
+	migrationsLocked  bool
 }
 
 // Options operate at the Database level but are specified at the Schema level
@@ -210,6 +218,25 @@ func (s *Schema) NewDatabase(log *internal.Log, dbName string, db *sql.DB, drive
 	return database, nil
 }
 
+// NewDatabaseWithOpener creates a Database object.  For Postgres and Mysql this is bundled into
+// lspostgres.NewWithOpener() and lsmysql.NewWithOpener().
+//
+// It is the caller's responsibility to eventually call database.DB().Close() when using
+// NewDatabaseWithOpener().
+func (s *Schema) NewDatabaseWithOpener(log *internal.Log, dbName string, opener func() (*sql.DB, error), driver Driver) (*Database, error) {
+	db, err := opener()
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	database, err := s.NewDatabase(log, dbName, db, driver)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	database.reconnect = opener
+	return database, nil
+}
+
 // Asynchronous marks a migration is okay to run asynchronously.  If all of the
 // remaining migrations can be asynchronous, then schema.Migrate() will return
 // while the remaining migrations run.
@@ -269,6 +296,15 @@ func After(lib, migration string) MigrationOption {
 func SkipIf(pred func() (bool, error)) MigrationOption {
 	return func(m Migration) {
 		m.Base().skipIf = pred
+	}
+}
+
+// ReconnectAfter directs libschema to close the database connection and
+// reopen it after applying this migration. This requires that the Database
+// be created with NewDatabaseWithOpener.
+func ReconnectAfter() MigrationOption {
+	return func(m Migration) {
+		m.Base().reconnectAfter = true
 	}
 }
 
@@ -444,6 +480,9 @@ func (m *MigrationBase) ForcedNonTransactional() bool { return m.forcedTx != nil
 
 // PreserveComments reports if PreserveComments() was set on this migration.
 func (m *MigrationBase) PreserveComments() bool { return m.preserveComments }
+
+// ReconnectAfter reports if ReconnectAfter() was set on this migration.
+func (m *MigrationBase) ReconnectAfter() bool { return m.reconnectAfter }
 
 func (n MigrationName) String() string {
 	return n.Library + ": " + n.Name
