@@ -181,10 +181,15 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 	if err != nil {
 		return nil, errors.Wrap(err, "open")
 	}
+	var dbase *libschema.Database
 	defer func() {
 		if options == nil {
 			t.Log("Closing db...")
-			assert.NoError(t, db.Close())
+			if dbase != nil {
+				assert.NoError(t, dbase.DB().Close())
+			} else {
+				assert.NoError(t, db.Close())
+			}
 			t.Log("done")
 		}
 	}()
@@ -234,7 +239,7 @@ func doConfigMigrate(t *testing.T, options *libschema.Options, dsn string, expec
 		)
 	}
 
-	dbase, err := lspostgres.New(libschema.LogFromLog(t), "test", s, db)
+	dbase, err = lspostgres.New(libschema.LogFromLog(t), "test", s, db)
 	if err != nil {
 		return db, errors.Wrap(err, "new")
 	}

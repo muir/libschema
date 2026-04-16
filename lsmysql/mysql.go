@@ -47,12 +47,13 @@ import (
 type MySQL struct {
 	lockTx              *sql.Tx
 	lockStr             string
-	db                  *sql.DB
+	database            *libschema.Database
 	databaseName        string
 	lock                sync.Mutex
 	trackingSchemaTable func(*libschema.Database) (string, string, string, error)
 	skipDatabase        bool
 	dialect             classifysql.Dialect
+	optDB               *sql.DB // not nil when m.skipDatabase is true
 }
 
 // applySchemaOverrideMySQL sets the database (schema) for the current connection/transaction
@@ -80,13 +81,35 @@ func WithoutDatabase(p *MySQL) {
 	p.skipDatabase = true
 }
 
+// WithDatabase provides a pre-created libschema.Database for MySQL to use
+func WithDatabase(database *libschema.Database) MySQLOpt {
+	return func(p *MySQL) {
+		p.database = database
+		p.databaseName = database.Options.SchemaOverride
+	}
+}
+
 // New creates a libschema.Database with a mysql driver built in.  The dbName
-// parameter specifies the name of the database, but that name is not actaully
+// parameter specifies the name of the database, but that name is not actually
 // used anywhere except for logging.  To override the database used for the
 // migrations set the SchemaOverride option.
 func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB, options ...MySQLOpt) (*libschema.Database, *MySQL, error) {
+	return newMaybeWithOpener(log, dbName, schema, db, nil, options...)
+}
+
+// NewWithOpener creates a libschema.Database with a mysql driver built in.  The dbName
+// parameter specifies the name of the database, but that name is not actually
+// used anywhere except for logging.  To override the database used for the
+// migrations set the SchemaOverride option.
+//
+// It is the caller's responsibility to eventually call either database.DB().Close()
+// or mysql.DB().Close()
+func NewWithOpener(log *internal.Log, dbName string, schema *libschema.Schema, opener func() (*sql.DB, error), options ...MySQLOpt) (*libschema.Database, *MySQL, error) {
+	return newMaybeWithOpener(log, dbName, schema, nil, opener, options...)
+}
+
+func newMaybeWithOpener(log *internal.Log, dbName string, schema *libschema.Schema, maybeDB *sql.DB, maybeOpener func() (*sql.DB, error), options ...MySQLOpt) (*libschema.Database, *MySQL, error) {
 	m := &MySQL{
-		db:                  db,
 		trackingSchemaTable: trackingSchemaTable,
 		dialect:             classifysql.DialectMySQL,
 	}
@@ -94,13 +117,32 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB,
 		opt(m)
 	}
 	var d *libschema.Database
-	if !m.skipDatabase {
+	switch {
+	case m.database != nil:
+		// WithDatabase was used
+		d = m.database
+	case m.skipDatabase:
+		if maybeDB != nil {
+			m.optDB = maybeDB
+		} else {
+			var err error
+			m.optDB, err = maybeOpener()
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "open database")
+			}
+		}
+	default:
 		var err error
-		d, err = schema.NewDatabase(log, dbName, db, m)
+		if maybeDB != nil {
+			d, err = schema.NewDatabase(log, dbName, maybeDB, m)
+		} else {
+			d, err = schema.NewDatabaseWithOpener(log, dbName, maybeOpener, m)
+		}
 		if err != nil {
 			return nil, nil, err
 		}
 		m.databaseName = d.Options.SchemaOverride
+		m.database = d
 	}
 	return d, m, nil
 }
@@ -608,4 +650,11 @@ func (p *MySQL) IsMigrationSupported(d *libschema.Database, _ *internal.Log, mig
 	}
 	// All mmigration instances are supported; body presence checked at execution.
 	return nil
+}
+
+func (p *MySQL) DB() *sql.DB {
+	if p.database != nil {
+		return p.database.DB()
+	}
+	return p.optDB
 }
