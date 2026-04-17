@@ -50,7 +50,7 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 // NewWithOpener creates a libschema.Database with a Singlestore driver built in.
 //
 // It is the caller's responsibility to eventually call either database.DB().Close()
-// or singlestore.DB().Close()
+// or singlestore.DB().Close(). The simple way to do that is to set the CloseOnComplete option.
 func NewWithOpener(log *internal.Log, dbName string, schema *libschema.Schema, opener func() (*sql.DB, error)) (*libschema.Database, *SingleStore, error) {
 	return newMaybeWithOpener(log, dbName, schema, nil, opener)
 }

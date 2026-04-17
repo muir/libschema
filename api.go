@@ -3,6 +3,7 @@ package libschema
 import (
 	"context"
 	"database/sql"
+	"sync/atomic"
 
 	"github.com/memsql/errors"
 
@@ -128,9 +129,10 @@ type Database struct {
 	parent            *Schema
 	Options           Options
 	log               *internal.Log
-	asyncInProgress   bool
+	asyncInProgress   atomic.Bool
 	unknownMigrations []MigrationName
 	migrationsLocked  bool
+	allDoneDone       atomic.Int32 // 0 until allDone called
 }
 
 // Options operate at the Database level but are specified at the Schema level
@@ -165,10 +167,15 @@ type Options struct {
 	// OnMigrationsStarted is called for each Database (if needed).
 	OnMigrationsStarted func(dbase *Database)
 
-	// OnMigrationsComplete called even if no migrations are needed.  It
+	// OnMigrationsComplete is called even if no migrations are needed. It
 	// will be called when async migrations finish even if they finish
-	// with an error.  OnMigrationsComplete is called for each Database.
+	// with an error.  OnMigrationsComplete is called for each Database,
+	// even for ones excluded by other options (eg MigrateDatabase)
 	OnMigrationsComplete func(dbase *Database, err error)
+
+	// CloseOnComplete causes the database handled to be closed when the
+	// migrations are complete, regardless of outcome.
+	CloseOnComplete bool
 
 	// DebugLogging turns on extra debug logging
 	DebugLogging bool
@@ -222,7 +229,7 @@ func (s *Schema) NewDatabase(log *internal.Log, dbName string, db *sql.DB, drive
 // lspostgres.NewWithOpener() and lsmysql.NewWithOpener().
 //
 // It is the caller's responsibility to eventually call database.DB().Close() when using
-// NewDatabaseWithOpener().
+// NewDatabaseWithOpener(). The simple way to do that is to set the CloseOnComplete option.
 func (s *Schema) NewDatabaseWithOpener(log *internal.Log, dbName string, opener func() (*sql.DB, error), driver Driver) (*Database, error) {
 	db, err := opener()
 	if err != nil {

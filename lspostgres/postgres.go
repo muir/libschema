@@ -44,7 +44,8 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB)
 // parameter is used internally by libschema, but does not affect where migrations
 // are actually applied.
 //
-// It is the caller's responsibility to eventually call database.DB().Close()
+// It is the caller's responsibility to eventually call database.DB().Close().
+// The simple way to do that is to set the CloseOnComplete option.
 func NewWithOpener(log *internal.Log, dbName string, schema *libschema.Schema, opener func() (*sql.DB, error)) (*libschema.Database, error) {
 	return schema.NewDatabaseWithOpener(log, dbName, opener, &Postgres{log: log})
 }

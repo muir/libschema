@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
-          go-version: '1.21'
+          go-version: '1.22'
       - name: Run coverage
         run: make calculate_coverage
 
