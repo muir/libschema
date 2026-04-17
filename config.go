@@ -12,9 +12,13 @@ type OverrideOptions struct {
 
 	// MigrateDatabase specifies that only a specific database should
 	// be migrated.  The name must match to a name provided with the schema.NewDatabase() call.
-	// For both libschema/lsmysql and libschema/lspostgres, that is the name parameter to
-	// New() NOT the database name in the DSN.  This is a logical name.
-	MigrateDatabase string `flag:"migrate-database" help:"Migrate only the this database"`
+	// For libschema/lsmysql, libschema/lspostgres and libschema/lssinglestore, that is the
+	// name parameter to New() NOT the database name in the DSN.  This is a logical name.
+	//
+	// MigrateDatabase narrows the scope of which databases migrate but OnMigrationsComplete and
+	// CloseOnComplete still apply to all databases. OnMigrationsStarted only
+	// applies to databases that are being migrated.
+	MigrateDatabase string `flag:"migrate-database" help:"Migrate only this database"`
 
 	// MigrateDSN overrides the data source name for a single database.  It must be used in
 	// conjunction with MigrateDatabase unless there are only migrations for a single database.

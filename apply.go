@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/hashicorp/go-multierror"
 	"github.com/memsql/errors"
 
 	"github.com/muir/libschema/dgorder"
@@ -30,10 +29,13 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 			os.Exit(0)
 		}()
 	}
-	if s.options.Overrides.NoMigrate {
-		return nil
-	}
 	todo := s.databaseOrder
+	for _, d := range todo {
+		d.allDoneDone.Store(0)
+		defer func() {
+			d.allDone(nil, err)
+		}()
+	}
 	if s.options.Overrides.MigrateDatabase != "" {
 		if d, ok := s.databases[s.options.Overrides.MigrateDatabase]; ok {
 			todo = []*Database{d}
@@ -44,11 +46,20 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 	if s.options.Overrides.MigrateDSN != "" && len(todo) > 1 {
 		return errors.Errorf("--migrate-dsn can only be used when there is only one database to migrate")
 	}
+	if s.options.Overrides.NoMigrate {
+		return nil
+	}
 	for _, d := range todo {
 		if len(d.errors) != 0 {
-			return multierror.Append(d.errors[0], d.errors[1:]...)
+			err := errors.Join(d.errors...)
+			d.allDone(nil, err)
+			return err
 		}
 		err := func(d *Database) (finalErr error) {
+			var m Migration
+			defer func() {
+				d.allDone(m, finalErr)
+			}()
 			if s.options.Overrides.MigrateDSN != "" {
 				var err error
 				d.db, err = OpenAnyDB(s.options.Overrides.MigrateDSN)
@@ -61,7 +72,7 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 				return err
 			}
 			defer func() {
-				err := d.unlock()
+				err := d.unlock(false)
 				if err != nil && finalErr == nil {
 					finalErr = err
 				}
@@ -69,7 +80,8 @@ func (s *Schema) Migrate(ctx context.Context) (err error) {
 			if s.options.Overrides.ErrorIfMigrateNeeded && !d.done(s) {
 				return errors.Errorf("migrations required for %s", d.DBName)
 			}
-			return d.migrate(ctx, s)
+			m, err = d.migrate(ctx, s)
+			return err
 		}(d)
 		if err != nil {
 			return err
@@ -154,22 +166,16 @@ func (d *Database) done(s *Schema) bool {
 	return true
 }
 
-func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
+func (d *Database) migrate(ctx context.Context, s *Schema) (lastMigration Migration, err error) {
 	if d.Options.ErrorOnUnknownMigrations && len(d.unknownMigrations) > 0 {
-		return errors.Errorf("%d unknown migrations, including %s", len(d.unknownMigrations), d.unknownMigrations[0])
+		return nil, errors.Errorf("%d unknown migrations, including %s", len(d.unknownMigrations), d.unknownMigrations[0])
 	}
-
-	defer func() {
-		if !d.asyncInProgress {
-			d.allDone(nil, err)
-		}
-	}()
 
 	if d.done(s) {
 		d.log.Info("No migrations needed", map[string]interface{}{
 			"database": d.DBName,
 		})
-		return nil
+		return nil, nil
 	}
 
 	if d.Options.OnMigrationsStarted != nil {
@@ -203,10 +209,10 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 				"name":     m.Base().Name.Name,
 			})
 			if !s.options.Overrides.MigrateOnly {
-				d.asyncInProgress = true
+				d.asyncInProgress.Store(true)
 				go d.asyncMigrate(ctx)
 			}
-			return nil
+			return m, nil
 		}
 		var stop bool
 		stop, err = d.doOneMigration(ctx, m)
@@ -216,10 +222,10 @@ func (d *Database) migrate(ctx context.Context, s *Schema) (err error) {
 			syncExecuted = append(syncExecuted, m)
 		}
 		if err != nil || stop {
-			return err
+			return m, err
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func (d *Database) reportSequenceError(migrations []Migration, err error, syncOrAsync string) {
@@ -375,8 +381,19 @@ func (d *Database) lastUnfinishedSynchrnous() int {
 
 // allDone reports status
 func (d *Database) allDone(m Migration, err error) {
+	if d.asyncInProgress.Load() {
+		// so that allDone can be called in defer
+		return
+	}
+	// only report complete at most once
+	if d.allDoneDone.Add(1) != 1 {
+		return
+	}
 	if d.Options.OnMigrationsComplete != nil {
 		d.Options.OnMigrationsComplete(d, err)
+	}
+	if d.Options.CloseOnComplete {
+		_ = d.db.Close()
 	}
 	if err != nil {
 		logInfo := map[string]any{
@@ -400,12 +417,14 @@ func (d *Database) asyncMigrate(ctx context.Context) {
 	var m Migration
 	d.log.Info("Starting async migrations")
 	defer func() {
-		d.asyncInProgress = false
-		e := d.unlock()
+		defer func() {
+			d.asyncInProgress.Store(false)
+			d.allDone(m, err)
+		}()
+		e := d.unlock(true)
 		if err == nil {
 			err = e
 		}
-		d.allDone(m, err)
 		d.log.Info("Done with async migrations")
 	}()
 	var i int
@@ -424,8 +443,9 @@ func (d *Database) asyncMigrate(ctx context.Context) {
 	}
 }
 
-func (d *Database) unlock() error {
-	if !d.asyncInProgress {
+// force is used so that asyncInProgress can be cleared only after unlocking is complete.
+func (d *Database) unlock(force bool) error {
+	if force || !d.asyncInProgress.Load() {
 		if d.migrationsLocked {
 			err := d.driver.UnlockMigrationsTable(d.log)
 			if err != nil {
