@@ -103,7 +103,7 @@ func New(log *internal.Log, dbName string, schema *libschema.Schema, db *sql.DB,
 // migrations set the SchemaOverride option.
 //
 // It is the caller's responsibility to eventually call either database.DB().Close()
-// or mysql.DB().Close()
+// or mysql.DB().Close(). The simple way to do that is to set the CloseOnComplete option.
 func NewWithOpener(log *internal.Log, dbName string, schema *libschema.Schema, opener func() (*sql.DB, error), options ...MySQLOpt) (*libschema.Database, *MySQL, error) {
 	return newMaybeWithOpener(log, dbName, schema, nil, opener, options...)
 }

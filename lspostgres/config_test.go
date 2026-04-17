@@ -40,13 +40,24 @@ func TestOverrideMigrateOnly(t *testing.T) {
 
 func TestOverrideMigrateDatabaseNotMatching(t *testing.T) {
 	t.Parallel()
+	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	options.CloseOnComplete = true
 	var code string
-	_, err := doConfigMigrate(t, nil, getDSN(t), false, &code, nil, &libschema.OverrideOptions{
+	dsn := getDSN(t)
+	db, err := doConfigMigrate(t, &options, dsn, true, &code, nil, &libschema.OverrideOptions{
 		MigrateDatabase: "notmatching",
 	})
 	if assert.Error(t, err) {
 		assert.Contains(t, err.Error(), "migrate: database 'notmatching'")
 	}
+	assert.Error(t, db.Ping())
+	if assert.NotNil(t, db) {
+		_ = db.Close()
+	}
+	db, err = sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	cleanup(db)
+	assert.NoError(t, db.Close())
 	assert.Equal(t, "", code)
 }
 
@@ -107,6 +118,42 @@ func TestOverrideNoMigrate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "", code)
 	assert.Equal(t, "", code2)
+}
+
+func TestOverrideMigrateCloseOnCompleteNoMigrate(t *testing.T) {
+	t.Parallel()
+	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	options.CloseOnComplete = true
+	var code string
+	dsn := getDSN(t)
+	db, err := doConfigMigrate(t, &options, dsn, false, &code, nil, &libschema.OverrideOptions{
+		NoMigrate: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "", code)
+	assert.Eventually(t, func() bool { return db.Ping() != nil }, time.Second, time.Millisecond*4)
+	_ = db.Close()
+	db, err = sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	cleanup(db)
+	assert.NoError(t, db.Close())
+}
+
+func TestOverrideMigrateCloseOnCompleteAsync(t *testing.T) {
+	t.Parallel()
+	options, cleanup := lstesting.FakeSchema(t, "CASCADE")
+	options.CloseOnComplete = true
+	var code string
+	dsn := getDSN(t)
+	db, err := doConfigMigrate(t, &options, dsn, true, &code, nil, &libschema.OverrideOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "m2async", code)
+	assert.Eventually(t, func() bool { return db.Ping() != nil }, time.Second, time.Millisecond*4)
+	_ = db.Close()
+	db, err = sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	cleanup(db)
+	assert.NoError(t, db.Close())
 }
 
 func TestOverrideErrorIfMigrateNeeded(t *testing.T) {
