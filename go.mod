@@ -8,7 +8,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/lib/pq v1.12.3
 	github.com/memsql/errors v0.2.0
-	github.com/muir/sqltoken v0.5.1
+	github.com/muir/sqltoken v0.5.2
 	github.com/muir/testinglogur v0.0.1
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
