@@ -211,7 +211,8 @@ func trackingSchemaTable(d *libschema.Database) (string, string, string, error) 
 	s := strings.Split(tableName, ".")
 	switch len(s) {
 	case 2:
-		schema, err := makeID(s[0])
+		schema := s[0]
+		quotedSchema, err := makeID(schema)
 		if err != nil {
 			return "", "", "", errors.Wrap(err, "cannot make tracking table schema name")
 		}
@@ -219,7 +220,7 @@ func trackingSchemaTable(d *libschema.Database) (string, string, string, error) 
 		if err != nil {
 			return "", "", "", errors.Wrap(err, "cannot make tracking table table name")
 		}
-		return schema, schema + "." + table, table, nil
+		return schema, quotedSchema + "." + table, table, nil
 	case 1:
 		table, err := makeID(tableName)
 		if err != nil {
@@ -238,11 +239,25 @@ func (p *SingleStore) CreateSchemaTableIfNotExists(ctx context.Context, _ *inter
 		return err
 	}
 	if schema != "" {
-		_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
-				CREATE DATABASE IF NOT EXISTS %s PARTITIONS 2
-				`, schema))
+		var schemaExists bool
+		err = d.DB().QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = ?)`,
+			schema,
+		).Scan(&schemaExists)
 		if err != nil {
-			return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
+			return errors.Wrapf(err, "could not check if libschema schema '%s' exists", schema)
+		}
+		if !schemaExists {
+			quotedSchema, err := makeID(schema)
+			if err != nil {
+				return errors.Wrap(err, "cannot make tracking table schema name")
+			}
+			_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
+					CREATE DATABASE IF NOT EXISTS %s PARTITIONS 2
+					`, quotedSchema))
+			if err != nil {
+				return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
+			}
 		}
 	}
 	_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
