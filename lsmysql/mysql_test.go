@@ -91,6 +91,9 @@ func testMysqlHappyPath(t *testing.T, dsn string, createPostfix string, driverNe
 	}()
 	defer cleanup(db)
 
+	_, err = db.Exec("CREATE SCHEMA " + options.SchemaOverride)
+	require.NoError(t, err)
+
 	s := libschema.New(context.Background(), options)
 	dbase, _, err := driverNew(t, "test", s, db)
 	require.NoError(t, err, "libschema NewDatabase")

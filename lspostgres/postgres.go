@@ -330,25 +330,35 @@ func (p *Postgres) DoOneMigration(ctx context.Context, log *internal.Log, d *lib
 // CreateSchemaTableIfNotExists creates the migration tracking table for libschema.
 // It is expected to be called by libschema.
 func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Log, d *libschema.Database) error {
-	schema, tableName, err := trackingSchemaTable(d)
+	schemaName, schema, tableName, err := trackingSchemaTable(d)
 	if err != nil {
 		return err
 	}
-	for {
-		if schema != "" {
-			_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
-					CREATE SCHEMA IF NOT EXISTS %s
-					`, schema))
-			if err != nil {
+	if schemaName != "" {
+		var schemaExists bool
+		err = d.DB().QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)`,
+			schemaName,
+		).Scan(&schemaExists)
+		if err != nil {
+			return errors.Wrapf(err, "could not check if libschema schema '%s' exists", schemaName)
+		}
+		if !schemaExists {
+			for {
+				_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
+						CREATE SCHEMA IF NOT EXISTS %s
+						`, schema))
+				if err == nil {
+					break
+				}
 				if strings.Contains(err.Error(), `pq: duplicate key value violates unique constraint "pg_namespace_nspname_index"`) {
 					p.log.Warn("Ignoring create schema collision with another transaction and trying again")
 					time.Sleep(time.Second)
 					continue
 				}
-				return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
+				return errors.Wrapf(err, "could not create libschema schema '%s'", schemaName)
 			}
 		}
-		break
 	}
 	for {
 		_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
@@ -374,25 +384,26 @@ func (p *Postgres) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal
 	return nil
 }
 
-func trackingSchemaTable(d *libschema.Database) (string, string, error) {
+func trackingSchemaTable(d *libschema.Database) (schemaName string, quotedSchema string, quotedTable string, err error) {
 	tableName := d.Options.TrackingTable
 	s := strings.Split(tableName, ".")
 	switch len(s) {
 	case 2:
-		schema := pq.QuoteIdentifier(s[0])
+		schemaName = s[0]
+		quotedSchema = pq.QuoteIdentifier(schemaName)
 		table := pq.QuoteIdentifier(s[1])
-		return schema, schema + "." + table, nil
+		return schemaName, quotedSchema, quotedSchema + "." + table, nil
 	case 1:
-		return "", pq.QuoteIdentifier(tableName), nil
+		return "", "", pq.QuoteIdentifier(tableName), nil
 	default:
-		return "", "", errors.Errorf("tracking table '%s' is not valid", tableName)
+		return "", "", "", errors.Errorf("tracking table '%s' is not valid", tableName)
 	}
 }
 
 // trackingTable returns the schema+table reference for the migration tracking table.
 // The name is already quoted properly for use as a save postgres identifier.
 func trackingTable(d *libschema.Database) string {
-	_, table, _ := trackingSchemaTable(d)
+	_, _, table, _ := trackingSchemaTable(d)
 	return table
 }
 
