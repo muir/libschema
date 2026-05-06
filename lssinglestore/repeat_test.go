@@ -28,6 +28,9 @@ func TestRepeat(t *testing.T) {
 	defer func() { cleanup(db) }()
 	options.DebugLogging = true
 
+	_, err = db.Exec("CREATE DATABASE IF NOT EXISTS " + options.SchemaOverride + " PARTITIONS 2")
+	require.NoError(t, err)
+
 	s := libschema.New(context.Background(), options)
 	log := libschema.LogFromLog(t)
 	dbase, _, err := lssinglestore.New(log, "test", s, db)
