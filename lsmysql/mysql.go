@@ -391,11 +391,21 @@ func (p *MySQL) CreateSchemaTableIfNotExists(ctx context.Context, _ *internal.Lo
 		return err
 	}
 	if schema != "" {
-		_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
-				CREATE SCHEMA IF NOT EXISTS %s
-				`, schema))
+		var schemaExists bool
+		err = d.DB().QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = ?)`,
+			schema,
+		).Scan(&schemaExists)
 		if err != nil {
-			return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
+			return errors.Wrapf(err, "could not check if libschema schema '%s' exists", schema)
+		}
+		if !schemaExists {
+			_, err := d.DB().ExecContext(ctx, fmt.Sprintf(`
+					CREATE SCHEMA IF NOT EXISTS %s
+					`, schema))
+			if err != nil {
+				return errors.Wrapf(err, "could not create libschema schema '%s'", schema)
+			}
 		}
 	}
 	_, err = d.DB().ExecContext(ctx, fmt.Sprintf(`
