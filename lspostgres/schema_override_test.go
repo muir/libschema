@@ -31,6 +31,8 @@ func TestSchemaOverrideTransactional(t *testing.T) {
 	t.Cleanup(func() { cleanup(db) })
 
 	ctx := context.Background()
+	_, err = db.Exec("CREATE SCHEMA " + opts.SchemaOverride)
+	require.NoError(t, err)
 	s := libschema.New(ctx, opts)
 	log := libschema.LogFromLog(t)
 	dbase, err := lspostgres.New(log, "schema_override_tx", s, db)
